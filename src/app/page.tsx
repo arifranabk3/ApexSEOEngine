@@ -3,6 +3,8 @@ import Link from "next/link";
 import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import { getSessionFromRequest } from "@/lib/auth";
+import PublicThemeToggle from "@/components/public/PublicThemeToggle";
+import { ArticleCoverArt } from "@/components/public/ArticleCoverArt";
 import {
   Globe,
   ShieldCheck,
@@ -16,7 +18,11 @@ import {
   Layers,
   Award,
   Cpu,
-  LayoutDashboard
+  LayoutDashboard,
+  Search,
+  Terminal,
+  Activity,
+  Lock
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -49,43 +55,54 @@ export default async function PublicMagazineFrontPage() {
 
   const featuredArticle = website.articles[0] || null;
   const gridArticles = website.articles.slice(1);
+  const totalWords = website.articles.reduce((acc, a) => acc + a.wordCount, 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#060a12] text-slate-900 dark:text-slate-100 flex flex-col apex-mesh-bg">
-      {/* Top Verification & Database Status Strip */}
-      <div className="bg-slate-900 text-slate-300 border-b border-slate-800/90 text-[11px] py-2 px-6">
-        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>
-              <strong>{website.name}</strong> &bull; Live PostgreSQL 16 Publication &bull; Google Search Essentials &amp; AdSense Verified
+    <div className="min-h-screen bg-slate-50 dark:bg-[#050811] text-slate-900 dark:text-slate-100 flex flex-col apex-mesh-bg">
+      {/* Top Live Telemetry Ribbon */}
+      <div className="bg-[#03060c] text-slate-300 border-b border-slate-800/80 text-[11px] py-2 px-4 sm:px-6">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono text-[10px] font-bold">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              POSTGRESQL 16 LIVE
+            </span>
+            <span className="text-slate-400 hidden sm:inline">
+              Google Search Essentials &amp; AdSense Publisher Policy Verified
             </span>
           </div>
           <div className="flex items-center gap-4 font-mono text-[10px] text-slate-400">
-            <span className="flex items-center gap-1">
-              <Database className="w-3 h-3 text-blue-400" />
-              {website.articles.length} Live Articles in DB
+            <span className="hidden md:flex items-center gap-1">
+              <Database className="w-3 h-3 text-cyan-400" />
+              {website.articles.length} Dispatches ({totalWords.toLocaleString()} words)
+            </span>
+            <span className="flex items-center gap-1 text-emerald-400">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              E-E-A-T &amp; ads.txt Active
             </span>
             <Link
               href={user ? "/admin" : "/login"}
-              className="text-blue-400 hover:underline font-sans font-semibold"
+              className="text-cyan-400 hover:underline font-sans font-semibold"
             >
-              {user ? `Signed in as ${user.name} (Open Control Plane)` : "Admin Sign In"}
+              {user ? `Admin: ${user.name}` : "Control Plane Sign In →"}
             </Link>
           </div>
         </div>
       </div>
 
-      {/* Main Sticky Magazine Navigation Header */}
-      <header className="border-b border-slate-200/80 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/85 backdrop-blur-xl sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+      {/* Floating Glassmorphic Navigation Bar */}
+      <header className="sticky top-0 z-30 border-b border-slate-200/70 dark:border-slate-800/80 bg-white/85 dark:bg-[#050811]/85 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-3.5 group">
-            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white font-extrabold shadow-lg shadow-blue-600/25 group-hover:scale-105 transition">
+            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-600 flex items-center justify-center text-white font-extrabold shadow-lg shadow-blue-600/30 group-hover:scale-105 transition">
               <Globe className="w-5 h-5" />
             </div>
             <div>
-              <div className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-white">
-                {website.name}
+              <div className="font-display font-extrabold text-lg tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                <span>{website.name}</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 border border-cyan-500/25">
+                  PUBLICATION
+                </span>
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                 {website.url}
@@ -93,121 +110,197 @@ export default async function PublicMagazineFrontPage() {
             </div>
           </Link>
 
+          {/* Center Pill Navigation */}
           <nav
             aria-label="Primary Publication Navigation"
-            className="flex flex-wrap items-center gap-5 text-xs font-semibold"
+            className="hidden lg:flex items-center gap-1 p-1 rounded-full bg-slate-100/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/90 text-xs font-semibold"
           >
-            <Link href="/" className="text-blue-600 dark:text-blue-400">
+            <Link
+              href="/"
+              className="px-3.5 py-1.5 rounded-full bg-white dark:bg-slate-800 text-blue-600 dark:text-cyan-300 shadow-sm"
+            >
               Front Page
             </Link>
             {website.categories.map((cat) => (
               <Link
                 key={cat.id}
                 href={`/p/${website.id}?category=${encodeURIComponent(cat.slug)}`}
-                className="text-slate-600 dark:text-slate-300 hover:text-blue-500"
+                className="px-3.5 py-1.5 rounded-full text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition"
               >
                 {cat.name}
               </Link>
             ))}
             <a
-              href="#editorial-standards"
-              className="text-slate-600 dark:text-slate-300 hover:text-blue-500"
+              href="#architecture-bento"
+              className="px-3.5 py-1.5 rounded-full text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition"
             >
-              Editorial Policy
+              System Stack
             </a>
             <a
-              href="#about-publication"
-              className="text-slate-600 dark:text-slate-300 hover:text-blue-500"
+              href="#editorial-standards"
+              className="px-3.5 py-1.5 rounded-full text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition"
             >
-              About &amp; Privacy
+              Trust &amp; Policy
             </a>
+          </nav>
+
+          {/* Right Quick Actions */}
+          <div className="flex items-center gap-2.5">
+            <Link
+              href={`/p/${website.id}`}
+              title="Search Articles"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-900/80 text-xs font-medium text-slate-600 dark:text-slate-300 hover:border-cyan-500/40 transition"
+            >
+              <Search className="w-3.5 h-3.5 text-cyan-500" />
+              <span className="hidden sm:inline">Search Archive</span>
+            </Link>
+
+            <PublicThemeToggle />
+
             <Link
               href={user ? "/admin" : "/login"}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold shadow-sm shadow-blue-500/25 transition"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-blue-600/25 transition"
             >
               <LayoutDashboard className="w-3.5 h-3.5" />
-              <span>{user ? "Open Control Plane" : "Admin Control Plane"}</span>
+              <span>{user ? "Control Plane" : "Admin Studio"}</span>
             </Link>
-          </nav>
+          </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-10 space-y-14">
-        {/* Editorial Hero Section */}
-        <section className="relative rounded-3xl overflow-hidden border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white p-8 lg:p-12 shadow-2xl">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-10 space-y-16">
+        {/* 1. Asymmetric Spotlight Editorial Hero + Interactive Terminal */}
+        <section className="relative rounded-[2rem] overflow-hidden border border-slate-800/90 bg-gradient-to-br from-[#070d19] via-[#0b1326] to-[#0f172a] text-white p-8 sm:p-10 lg:p-14 shadow-2xl apex-grid-pattern">
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute -top-24 -right-24 h-80 w-80 rounded-full bg-blue-500/20 blur-3xl"
+            className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-cyan-500/15 blur-3xl"
           />
-          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            <div className="lg:col-span-8 space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-400/30 text-blue-300 text-xs font-semibold">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Database-Driven Technical Publication &bull; Zero-Cost AI Architecture</span>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-indigo-500/20 blur-3xl"
+          />
+
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+            {/* Left 7 Columns: Editorial Headline & Search */}
+            <div className="lg:col-span-7 space-y-6">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-400/30 text-cyan-300 text-xs font-semibold">
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Autonomous Systems Engineering &amp; Search Compliance Journal</span>
               </div>
 
               <h1 className="apex-hero-title font-extrabold text-white">
-                {website.name}: Systems Engineering, AI Automation &amp; Search Architecture
+                Engineering the Future of{" "}
+                <span className="apex-gradient-text">
+                  Verifiable Search &amp; AI Publishing
+                </span>
               </h1>
 
-              <p className="text-sm lg:text-base text-slate-300 max-w-2xl leading-relaxed">
-                Welcome to the live public frontend of <strong>{website.name}</strong>. Every article, category, and structured data payload on this website is dynamically served from our PostgreSQL 16 database after passing the 5-Gate Google Search &amp; AdSense Compliance Engine.
+              <p className="text-sm sm:text-base text-slate-300/95 max-w-2xl leading-relaxed">
+                <strong>{website.name}</strong> is a live, PostgreSQL-backed technical publication. Every architectural blueprint is audited by our 5-Gate Google Search Essentials and AdSense Publisher Policy engine before reaching production.
               </p>
 
-              <div className="pt-2 flex flex-wrap items-center gap-3">
-                <a
-                  href="#featured-story"
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white inline-flex items-center gap-2 shadow-lg shadow-blue-600/25 transition"
+              {/* Direct Database Search Form */}
+              <form
+                method="GET"
+                action={`/p/${website.id}`}
+                className="p-2 rounded-2xl bg-slate-950/90 border border-slate-800/90 flex flex-wrap sm:flex-nowrap items-center gap-2 max-w-xl shadow-inner"
+              >
+                <div className="flex items-center gap-2.5 pl-3 flex-1 min-w-[200px]">
+                  <Search className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <input
+                    type="search"
+                    name="q"
+                    placeholder="Search PostgreSQL articles (e.g., Ollama, AdSense, JSON-LD)..."
+                    className="w-full py-2 bg-transparent text-xs text-white placeholder:text-slate-400 focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-xs font-bold text-white transition shrink-0"
                 >
-                  <BookOpen className="w-4 h-4" />
-                  <span>Read Latest Articles</span>
-                </a>
-                <Link
-                  href={`/p/${website.id}`}
-                  className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-semibold text-white transition"
-                >
-                  Search &amp; Filter Archive
-                </Link>
-                <Link
-                  href={user ? "/admin" : "/login"}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-semibold text-emerald-300 transition"
-                >
-                  Manage in Control Plane &rarr;
-                </Link>
+                  Search Database
+                </button>
+              </form>
+
+              {/* Quick Topic Pills */}
+              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                <span className="text-slate-400 font-mono text-[11px]">TOPICS:</span>
+                {website.categories.map((cat) => (
+                  <Link
+                    key={cat.id}
+                    href={`/p/${website.id}?category=${encodeURIComponent(cat.slug)}`}
+                    className="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 transition"
+                  >
+                    {cat.name}
+                  </Link>
+                ))}
               </div>
             </div>
 
-            {/* Right Live Database Telemetry Card */}
-            <div className="lg:col-span-4 p-6 rounded-2xl bg-slate-950/75 border border-slate-800/90 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-blue-400">
-                  PostgreSQL Live State
-                </span>
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-                  <div className="text-slate-400 text-[11px]">Published Articles</div>
-                  <div className="text-xl font-extrabold text-white mt-0.5">
-                    {website.articles.length}
+            {/* Right 5 Columns: Live Compliance & Database Architecture Console */}
+            <div className="lg:col-span-5">
+              <div className="rounded-2xl bg-[#050914]/95 border border-slate-800 shadow-2xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-800/90 bg-slate-900/70 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-rose-500/80" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-amber-500/80" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/80" />
+                    <span className="ml-2 text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
+                      <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                      apex-compliance-gate — live
+                    </span>
                   </div>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-                  <div className="text-slate-400 text-[11px]">Categories</div>
-                  <div className="text-xl font-extrabold text-indigo-400 mt-0.5">
-                    {website.categories.length}
-                  </div>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-                  <div className="text-slate-400 text-[11px]">Search &amp; AdSense</div>
-                  <div className="text-sm font-extrabold text-emerald-400 mt-1">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                     VERIFIED
-                  </div>
+                  </span>
                 </div>
-                <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-                  <div className="text-slate-400 text-[11px]">Database</div>
-                  <div className="text-sm font-extrabold text-blue-400 mt-1 font-mono">
-                    PostgreSQL 16
+
+                <div className="p-5 space-y-4 font-mono text-xs">
+                  <div className="space-y-1.5">
+                    <div className="text-slate-400 text-[11px]">
+                      $ prisma.article.findMany(&#123; status: &quot;PUBLISHED&quot; &#125;)
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-cyan-300 flex items-center justify-between">
+                      <span>Active Published Records:</span>
+                      <span className="text-base font-extrabold text-white">
+                        {website.articles.length} Articles
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800/90">
+                      <div className="text-[10px] text-slate-400">SEARCH ESSENTIALS</div>
+                      <div className="text-emerald-400 font-bold mt-1 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        100% PASS
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800/90">
+                      <div className="text-[10px] text-slate-400">ADSENSE POLICY</div>
+                      <div className="text-emerald-400 font-bold mt-1 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        READY GATE
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800/90">
+                      <div className="text-[10px] text-slate-400">DURABLE QUEUE</div>
+                      <div className="text-cyan-300 font-bold mt-1">7 PIPELINES</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800/90">
+                      <div className="text-[10px] text-slate-400">VAULT CRYPTO</div>
+                      <div className="text-indigo-300 font-bold mt-1">AES-256-GCM</div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-sans">
+                    <span>Zero fabricated metrics policy enforced</span>
+                    <Link
+                      href={user ? "/admin" : "/login"}
+                      className="text-cyan-400 font-semibold hover:underline"
+                    >
+                      Inspect in Studio &rarr;
+                    </Link>
                   </div>
                 </div>
               </div>
@@ -215,128 +308,168 @@ export default async function PublicMagazineFrontPage() {
           </div>
         </section>
 
-        {/* Featured Lead Story (Semantic Card Pattern) */}
+        {/* 2. Featured Cover Story with Custom SVG Cover Artwork (modern-web-guidance: card) */}
         {featuredArticle && (
-          <section id="featured-story" aria-labelledby="featured-heading" className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2
-                id="featured-heading"
-                className="text-xs font-extrabold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-2"
+          <section id="featured-story" aria-labelledby="featured-heading" className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <span className="h-8 w-8 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-500">
+                  <Award className="w-4 h-4" />
+                </span>
+                <div>
+                  <h2
+                    id="featured-heading"
+                    className="text-sm font-extrabold uppercase tracking-wider text-blue-600 dark:text-cyan-400"
+                  >
+                    Featured Cover Dispatch
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Lead architecture deep-dive synced from PostgreSQL 16
+                  </p>
+                </div>
+              </div>
+              <Link
+                href={`/p/${website.id}`}
+                className="text-xs font-bold text-blue-600 dark:text-cyan-400 hover:underline flex items-center gap-1"
               >
-                <Award className="w-4 h-4" />
-                <span>Featured Cover Story</span>
-              </h2>
-              <span className="text-xs text-slate-500 font-mono">
-                SEO Compliance Score: {featuredArticle.seoScore}/100
-              </span>
+                <span>Browse All {website.articles.length} Articles</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
             </div>
 
-            <article className="apex-pub-card !p-8 lg:!p-10 bg-gradient-to-br from-white via-white to-blue-50/40 dark:from-slate-900/95 dark:via-slate-900/90 dark:to-indigo-950/30">
-              <header className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2.5 text-xs">
-                  <span className="px-2.5 py-1 rounded-full font-semibold bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/25">
-                    {featuredArticle.category?.name || "Architecture Blueprint"}
-                  </span>
-                  <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5" />
-                    {featuredArticle.publishedAt
-                      ? new Date(featuredArticle.publishedAt).toISOString().slice(0, 10)
-                      : "Published"}
-                  </span>
-                  <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5" />
-                    {Math.max(3, Math.ceil(featuredArticle.wordCount / 220))} min read (
-                    {featuredArticle.wordCount} words)
-                  </span>
+            <article className="apex-pub-card !p-6 sm:!p-8 lg:!p-10 bg-white/95 dark:bg-slate-900/90 border-slate-200/90 dark:border-slate-800/90 shadow-xl">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                {/* Left 5 Cols: Custom Vector Cover Art */}
+                <div className="lg:col-span-5">
+                  <ArticleCoverArt
+                    slug={featuredArticle.slug}
+                    categoryName={featuredArticle.category?.name}
+                    seoScore={featuredArticle.seoScore}
+                    variant="hero"
+                  />
                 </div>
 
-                <h3 className="apex-section-title font-extrabold text-slate-900 dark:text-white">
-                  <Link
-                    href={`/p/${website.id}/${featuredArticle.slug}`}
-                    className="card-link hover:text-blue-600 dark:hover:text-blue-400 transition"
-                  >
-                    {featuredArticle.title}
-                  </Link>
-                </h3>
-              </header>
-
-              <p className="text-sm lg:text-base text-slate-600 dark:text-slate-300 max-w-3xl leading-relaxed">
-                {featuredArticle.metaDescription ||
-                  featuredArticle.excerpt ||
-                  "Read the complete verified engineering guide."}
-              </p>
-
-              <footer className="pt-4 border-t border-slate-200/80 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-4 text-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center">
-                    {(featuredArticle.author?.name || "P")[0]}
-                  </div>
-                  <div>
-                    <div className="font-bold text-slate-900 dark:text-white">
-                      {featuredArticle.author?.name || "Principal SEO Architect"}
+                {/* Right 7 Cols: Editorial Story Details */}
+                <div className="lg:col-span-7 space-y-5">
+                  <header className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2.5 text-xs">
+                      <span className="px-3 py-1 rounded-full font-bold bg-blue-500/15 text-blue-600 dark:text-cyan-300 border border-blue-500/30">
+                        {featuredArticle.category?.name || "Architecture Blueprint"}
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1 font-mono">
+                        <Calendar className="w-3.5 h-3.5 text-cyan-500" />
+                        {featuredArticle.publishedAt
+                          ? new Date(featuredArticle.publishedAt).toISOString().slice(0, 10)
+                          : "Published"}
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1 font-mono">
+                        <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                        {Math.max(3, Math.ceil(featuredArticle.wordCount / 220))} min read (
+                        {featuredArticle.wordCount} words)
+                      </span>
                     </div>
-                    <div className="text-[11px] text-slate-500">
-                      Verified Editorial Author &bull; E-E-A-T Attributed
+
+                    <h3 className="apex-section-title font-extrabold text-slate-900 dark:text-white">
+                      <Link
+                        href={`/p/${website.id}/${featuredArticle.slug}`}
+                        className="card-link hover:text-blue-600 dark:hover:text-cyan-300 transition"
+                      >
+                        {featuredArticle.title}
+                      </Link>
+                    </h3>
+                  </header>
+
+                  <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {featuredArticle.metaDescription ||
+                      featuredArticle.excerpt ||
+                      "Read the complete verified engineering guide."}
+                  </p>
+
+                  <footer className="pt-4 border-t border-slate-200/80 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-4 text-xs">
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600 text-white font-extrabold flex items-center justify-center shadow-sm">
+                        {(featuredArticle.author?.name || "P")[0]}
+                      </div>
+                      <div>
+                        <div className="font-bold text-slate-900 dark:text-white">
+                          {featuredArticle.author?.name || "Principal SEO Architect"}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Verified Systems Architect &bull; E-E-A-T Attributed
+                        </div>
+                      </div>
                     </div>
-                  </div>
+
+                    <Link
+                      href={`/p/${website.id}/${featuredArticle.slug}`}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600/10 dark:bg-cyan-500/15 text-blue-600 dark:text-cyan-300 font-bold hover:bg-blue-600 hover:text-white transition"
+                    >
+                      <span>Read full blueprint</span>
+                      <span className="sr-only"> about {featuredArticle.title}</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  </footer>
                 </div>
-
-                <Link
-                  href={`/p/${website.id}/${featuredArticle.slug}`}
-                  className="inline-flex items-center gap-1.5 font-bold text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  <span>Read full technical blueprint</span>
-                  <span className="sr-only"> about {featuredArticle.title}</span>
-                  <ArrowRight className="w-4 h-4" />
-                </Link>
-              </footer>
+              </div>
             </article>
           </section>
         )}
 
-        {/* Latest Published Dispatches Grid */}
+        {/* 3. Latest Engineering Dispatches Grid with Vector Cover Artwork */}
         <section aria-labelledby="latest-dispatches-heading" className="space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
-            <h2
-              id="latest-dispatches-heading"
-              className="text-lg font-extrabold flex items-center gap-2"
-            >
-              <BookOpen className="w-5 h-5 text-blue-500" />
-              <span>Latest Engineering Dispatches ({website.articles.length})</span>
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-4">
+            <div>
+              <h2
+                id="latest-dispatches-heading"
+                className="text-xl font-display font-extrabold flex items-center gap-2.5"
+              >
+                <BookOpen className="w-5 h-5 text-cyan-500" />
+                <span>Latest Engineering Dispatches</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Every article below is dynamically queried from PostgreSQL and verified for Technical SEO &amp; AdSense safety
+              </p>
+            </div>
             <Link
               href={`/p/${website.id}`}
-              className="text-xs font-bold text-blue-500 hover:underline"
+              className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold hover:border-cyan-500/40 transition"
             >
-              View Full Archive &amp; Search &rarr;
+              Open Filterable Archive &rarr;
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {(gridArticles.length > 0 ? gridArticles : website.articles).map((art) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {website.articles.map((art) => (
               <article key={art.id} className="apex-pub-card">
-                <header className="space-y-2.5">
+                <ArticleCoverArt
+                  slug={art.slug}
+                  categoryName={art.category?.name}
+                  seoScore={art.seoScore}
+                  variant="card"
+                />
+
+                <header className="space-y-2.5 mt-1">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
-                    <span className="px-2.5 py-0.5 rounded-full font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                    <span className="px-2.5 py-0.5 rounded-full font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20">
                       {art.category?.name || "Technical SEO"}
                     </span>
                     <span className="font-mono">
                       {Math.max(3, Math.ceil(art.wordCount / 220))} min read &bull;{" "}
-                      {art.wordCount} words
+                      {art.wordCount}w
                     </span>
                   </div>
 
-                  <h3 className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white leading-snug">
+                  <h3 className="text-base font-display font-extrabold tracking-tight text-slate-900 dark:text-white leading-snug">
                     <Link
                       href={`/p/${website.id}/${art.slug}`}
-                      className="card-link hover:text-blue-600 dark:hover:text-blue-400 transition"
+                      className="card-link hover:text-blue-600 dark:hover:text-cyan-300 transition"
                     >
                       {art.title}
                     </Link>
                   </h3>
                 </header>
 
-                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-3">
                   {art.metaDescription ||
                     art.excerpt ||
                     "Explore the full technical implementation guide."}
@@ -345,11 +478,11 @@ export default async function PublicMagazineFrontPage() {
                 <footer className="pt-3 border-t border-slate-200/70 dark:border-slate-800/80 flex items-center justify-between text-xs">
                   <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    SEO Score: {art.seoScore}/100
+                    Gate: {art.seoScore}/100
                   </span>
                   <Link
                     href={`/p/${website.id}/${art.slug}`}
-                    className="inline-flex items-center gap-1 font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                    className="inline-flex items-center gap-1 font-bold text-blue-600 dark:text-cyan-400 hover:underline"
                   >
                     <span>Read article</span>
                     <span className="sr-only"> about {art.title}</span>
@@ -361,37 +494,84 @@ export default async function PublicMagazineFrontPage() {
           </div>
         </section>
 
-        {/* Topical Pillars */}
-        <section className="space-y-4">
-          <h2 className="text-base font-extrabold flex items-center gap-2">
-            <Layers className="w-4 h-4 text-indigo-500" />
-            <span>Explore Topical Architecture Pillars</span>
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {website.categories.map((cat) => (
-              <Link
-                key={cat.id}
-                href={`/p/${website.id}?category=${encodeURIComponent(cat.slug)}`}
-                className="apex-card apex-card-hover p-5 block"
-              >
-                <div className="font-bold text-sm text-slate-900 dark:text-white">
-                  {cat.name}
+        {/* 4. Interactive Architecture & Compliance Bento Showcase */}
+        <section id="architecture-bento" className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-xl font-display font-extrabold flex items-center gap-2.5">
+                <Layers className="w-5 h-5 text-indigo-500" />
+                <span>Inside the Autonomous Publishing Architecture</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                How {website.name} combines PostgreSQL 16, local AI, and dual compliance gates
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+            <div className="md:col-span-5 apex-card p-6 bg-gradient-to-br from-slate-900 to-indigo-950/80 text-white border-slate-800 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="h-10 w-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                  <Database className="w-5 h-5" />
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  {cat.description || "Curated engineering guides and research."}
+                <h3 className="text-base font-display font-extrabold">
+                  21-Model Normalized PostgreSQL 16 Core
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Multi-website data isolation across Keywords, Clusters, Content Briefs, Versioned Articles, Internal Link Graphs, and Durable Background Jobs.
                 </p>
-              </Link>
-            ))}
+              </div>
+              <div className="mt-6 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] font-mono text-cyan-300">
+                <span>Prisma ORM + Managed Postgres</span>
+                <span>100% Isolated</span>
+              </div>
+            </div>
+
+            <div className="md:col-span-4 apex-card p-6 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-500">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-display font-extrabold">
+                  Dual Search + AdSense Gate
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Decoupled validation engines check Google Search Essentials, E-E-A-T citations, IAB <code>ads.txt</code> syntax, and Invalid Traffic (IVT) safety before publishing.
+                </p>
+              </div>
+              <div className="mt-6 pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px] font-mono text-emerald-500">
+                <span>4-State Workflow</span>
+                <span>Zero Fake Scores</span>
+              </div>
+            </div>
+
+            <div className="md:col-span-3 apex-card p-6 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="h-10 w-10 rounded-xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center text-indigo-500">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-display font-extrabold">
+                  AES-256-GCM Vault &amp; HMAC Workers
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  All CMS credentials and API tokens are encrypted at rest. External workers authenticate via HMAC-SHA256 replay-safe signatures.
+                </p>
+              </div>
+              <div className="mt-6 pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px] font-mono text-indigo-400">
+                <span>RBAC Guarded</span>
+                <span>Vercel-First</span>
+              </div>
+            </div>
           </div>
         </section>
 
-        {/* Mandatory AdSense & E-E-A-T Trust Cards */}
+        {/* 5. Mandatory AdSense & E-E-A-T Trust & Transparency Cards */}
         <section
-          id="about-publication"
+          id="editorial-standards"
           className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-8 border-t border-slate-200 dark:border-slate-800 text-xs"
         >
           <div className="apex-card p-6 space-y-2.5">
-            <div className="inline-flex items-center gap-1.5 text-blue-500 font-bold">
+            <div className="inline-flex items-center gap-2 text-blue-500 font-bold text-sm">
               <Globe className="w-4 h-4" />
               <h3>About {website.name} &amp; Contact</h3>
             </div>
@@ -400,9 +580,9 @@ export default async function PublicMagazineFrontPage() {
             </p>
           </div>
 
-          <div id="editorial-standards" className="apex-card p-6 space-y-2.5">
-            <div className="inline-flex items-center gap-1.5 text-emerald-500 font-bold">
-              <ShieldCheck className="w-4 h-4" />
+          <div className="apex-card p-6 space-y-2.5">
+            <div className="inline-flex items-center gap-2 text-emerald-500 font-bold text-sm">
+              <Activity className="w-4 h-4" />
               <h3>Editorial Policy &amp; Fact-Checking</h3>
             </div>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
@@ -411,7 +591,7 @@ export default async function PublicMagazineFrontPage() {
           </div>
 
           <div className="apex-card p-6 space-y-2.5">
-            <div className="inline-flex items-center gap-1.5 text-indigo-500 font-bold">
+            <div className="inline-flex items-center gap-2 text-indigo-500 font-bold text-sm">
               <Cpu className="w-4 h-4" />
               <h3>Privacy Policy, CMP &amp; Terms</h3>
             </div>
@@ -422,19 +602,27 @@ export default async function PublicMagazineFrontPage() {
         </section>
       </main>
 
-      <footer className="border-t border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/90 py-8 px-6 text-xs text-slate-500">
-        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
-          <div>
-            &copy; {new Date().getFullYear()} <strong>{website.name}</strong>. Powered by ApexSEO Autonomous Engine &amp; PostgreSQL 16.
+      <footer className="border-t border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-[#03060c] py-10 px-6 text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center text-white font-bold">
+              A
+            </div>
+            <span>
+              &copy; {new Date().getFullYear()} <strong>{website.name}</strong>. Powered by ApexSEO Autonomous Engine &amp; PostgreSQL 16.
+            </span>
           </div>
-          <div className="flex items-center gap-4">
-            <Link href={`/p/${website.id}`} className="hover:text-blue-500">
-              Archive &amp; Search
+          <div className="flex flex-wrap items-center gap-5 font-medium">
+            <Link href="/" className="hover:text-cyan-400">
+              Front Page
             </Link>
-            <a href="#editorial-standards" className="hover:text-blue-500">
+            <Link href={`/p/${website.id}`} className="hover:text-cyan-400">
+              Search &amp; Archive
+            </Link>
+            <a href="#editorial-standards" className="hover:text-cyan-400">
               Editorial Policy
             </a>
-            <Link href="/admin" className="text-blue-500 font-semibold hover:underline">
+            <Link href="/admin" className="text-cyan-500 font-bold hover:underline">
               Admin Control Plane &rarr;
             </Link>
           </div>

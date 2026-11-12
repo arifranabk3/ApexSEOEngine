@@ -15,3 +15,4 @@ export default async function AdminControlPlanePage() {
 
   return <DashboardShell initialUser={user} />;
 }
+
