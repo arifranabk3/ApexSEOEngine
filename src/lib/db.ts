@@ -144,6 +144,15 @@ export async function ensureDatabaseDaemon(): Promise<void> {
       `);
     }
 
+    // Apply external-scheduler migration (idempotent CREATE ... IF NOT EXISTS)
+    const schedulerMigration = path.resolve(
+      process.cwd(),
+      "prisma/migrations/20261112100000_external_scheduler/migration.sql"
+    );
+    if (fs.existsSync(schedulerMigration)) {
+      await pglite.exec(fs.readFileSync(schedulerMigration, "utf8").replace(/^\uFEFF/, ""));
+    }
+
     const server = new PGLiteSocketServer({
       db: pglite,
       port: parsedPort,

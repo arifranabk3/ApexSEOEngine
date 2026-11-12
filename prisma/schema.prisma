@@ -467,6 +467,43 @@ model DurableJob {
   @@index([lockedUntil])
 }
 
+/// PostgreSQL-backed recurring schedule definitions (replaces sub-daily Vercel Cron on Hobby).
+/// Triggered by an external scheduler (GitHub Actions / cron-job.org / self-hosted worker).
+model JobSchedule {
+  id              String    @id @default(uuid())
+  key             String    @unique
+  jobType         String
+  websiteId       String?
+  intervalMinutes Int
+  priority        Int       @default(20)
+  payload         Json      @default("{}")
+  isEnabled       Boolean   @default(true)
+  nextRunAt       DateTime  @default(now())
+  lastRunAt       DateTime?
+  lastJobCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([isEnabled, nextRunAt])
+}
+
+/// Execution log for every scheduler tick (audit trail + failure tracking).
+model SchedulerRun {
+  id                String    @id @default(uuid())
+  triggeredBy       String
+  status            String    @default("RUNNING")
+  recoveredLocks    Int       @default(0)
+  dueSchedules      Int       @default(0)
+  enqueuedCount     Int       @default(0)
+  deduplicatedCount Int       @default(0)
+  processedCount    Int       @default(0)
+  errorLog          String?
+  startedAt         DateTime  @default(now())
+  finishedAt        DateTime?
+
+  @@index([startedAt])
+}
+
 // ============================================================================
 // 7. SEARCH PERFORMANCE, SYSTEM SETTINGS & SECURITY AUDIT LOGS
 // ============================================================================

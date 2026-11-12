@@ -1,0 +1,36 @@
+# Free external scheduler for Vercel Hobby (replaces sub-daily Vercel Cron).
+# Requires repository secrets:
+#   SCHEDULER_URL    e.g. https://your-app.vercel.app
+#   SCHEDULER_SECRET same value as the Vercel env var SCHEDULER_SECRET
+# Note: GitHub may delay scheduled runs by several minutes; jobs are idempotent so that is safe.
+# Private repos: each run bills >=1 minute against the free 2,000 min/month — */30 uses ~1,440.
+name: External Scheduler Tick
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: scheduler-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger scheduler tick
+        env:
+          SCHEDULER_URL: ${{ secrets.SCHEDULER_URL }}
+          SCHEDULER_SECRET: ${{ secrets.SCHEDULER_SECRET }}
+        run: |
+          if [ -z "$SCHEDULER_URL" ] || [ -z "$SCHEDULER_SECRET" ]; then
+            echo "SCHEDULER_URL / SCHEDULER_SECRET secrets not configured; skipping."
+            exit 0
+          fi
+          curl --fail-with-body --silent --show-error --max-time 60 \
+            --retry 3 --retry-delay 10 --retry-all-errors \
+            -X POST "${SCHEDULER_URL%/}/api/v1/scheduler/tick" \
+            -H "Authorization: Bearer ${SCHEDULER_SECRET}" \
+            -H "X-Scheduler-Source: github-actions"

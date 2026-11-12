@@ -10,8 +10,7 @@
   "crons": [
     {
       "path": "/api/v1/cron/enqueue-schedules",
-      "schedule": "0 * * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
-

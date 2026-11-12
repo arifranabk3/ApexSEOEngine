@@ -17,6 +17,7 @@ import {
   signWorkerPayload,
   getWorkerSharedSecret
 } from "../../src/services/automation/durable-job-queue";
+import { runSchedulerTick } from "../../src/services/automation/job-scheduler";
 
 const WORKER_ID = process.env.WORKER_ID || `standalone-automation-worker-${process.pid}`;
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS || 10_000);
@@ -110,10 +111,23 @@ export function startStandaloneWorkerDaemon() {
     });
   }, POLL_INTERVAL_MS);
 
+  // Built-in self-hosted scheduler (replaces sub-daily Vercel Cron). Disable with
+  // SCHEDULER_INTERVAL_MS=0 when GitHub Actions / cron-job.org drives the tick instead.
+  const schedulerIntervalMs = Number(process.env.SCHEDULER_INTERVAL_MS ?? 60_000);
+  const schedulerTimer =
+    schedulerIntervalMs > 0
+      ? setInterval(() => {
+          runSchedulerTick({ triggeredBy: `worker:${WORKER_ID}` }).catch((err) => {
+            console.error("[AutomationWorker] Scheduler tick error:", err);
+          });
+        }, schedulerIntervalMs)
+      : null;
+
   return {
     server,
     stop: () => {
       clearInterval(interval);
+      if (schedulerTimer) clearInterval(schedulerTimer);
       server.close();
     }
   };

@@ -1,18 +1,14 @@
 import { NextRequest } from "next/server";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import { apiError, apiSuccess } from "@/lib/api-response";
-import {
-  enqueueDurableJob,
-  recoverStalledJobs,
-  verifyWorkerSignature
-} from "@/services/automation/durable-job-queue";
+import { verifyWorkerSignature } from "@/services/automation/durable-job-queue";
+import { runSchedulerTick } from "@/services/automation/job-scheduler";
 
 /**
  * GET /api/v1/cron/enqueue-schedules
- * Lightweight Vercel Cron trigger (executes in <200ms).
- * Never runs long-lived workers inside Vercel Functions — only recovers expired leases
- * and idempotently enqueues scheduled jobs into PostgreSQL for the external Automation Service.
+ * Optional DAILY safety-net trigger (Vercel Hobby allows at most one run per day).
+ * Sub-daily scheduling is driven externally via POST /api/v1/scheduler/tick.
+ * Delegates to the same PostgreSQL-backed scheduler, so it is idempotent.
  */
 export async function GET(req: NextRequest) {
   await ensureSystemSeeded();
@@ -32,52 +28,6 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const db = await getDb();
-  const recoveredLocks = await recoverStalledJobs();
-
-  const websites = await db.website.findMany({
-    where: { status: "ACTIVE" },
-    select: { id: true, name: true, url: true }
-  });
-
-  const dateBucket = new Date().toISOString().slice(0, 13); // hourly idempotency bucket
-  const enqueuedJobs = [];
-
-  for (const site of websites) {
-    const gscSyncJob = await enqueueDurableJob({
-      websiteId: site.id,
-      jobType: "SEARCH_PERFORMANCE_MONITORING",
-      idempotencyKey: `scheduled-gsc-sync:${site.id}:${dateBucket}`,
-      priority: 20,
-      payload: {
-        websiteId: site.id,
-        websiteUrl: site.url,
-        scheduledBucket: dateBucket
-      }
-    });
-    enqueuedJobs.push(gscSyncJob);
-
-    const seoAuditJob = await enqueueDurableJob({
-      websiteId: site.id,
-      jobType: "SEO_AUDITING",
-      idempotencyKey: `scheduled-seo-audit:${site.id}:${dateBucket}`,
-      priority: 30,
-      payload: {
-        websiteId: site.id,
-        pageUrl: site.url,
-        title: `${site.name} Scheduled Compliance Verification`,
-        slug: "index"
-      }
-    });
-    enqueuedJobs.push(seoAuditJob);
-  }
-
-  return apiSuccess({
-    triggeredAt: new Date().toISOString(),
-    recoveredLocks,
-    enqueuedCount: enqueuedJobs.filter((j) => !j.deduplicated).length,
-    deduplicatedCount: enqueuedJobs.filter((j) => j.deduplicated).length,
-    jobs: enqueuedJobs
-  });
+  const result = await runSchedulerTick({ triggeredBy: "vercel-daily-cron" });
+  return apiSuccess({ triggeredAt: new Date().toISOString(), ...result });
 }
-
