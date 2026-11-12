@@ -39,7 +39,7 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      router.push("/");
+      router.push("/admin");
       router.refresh();
     } catch {
       setError("Network error while connecting to authentication service");
