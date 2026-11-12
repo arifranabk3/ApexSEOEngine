@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: seo_automation_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-seo_automation}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d seo_automation"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: seo_automation_n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=seo_automation
+      - DB_POSTGRESDB_USER=postgres
+      - DB_POSTGRESDB_PASSWORD=postgres
+      - DB_POSTGRESDB_SCHEMA=n8n
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: seo_automation_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seo_automation_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/seo_automation?schema=public"
+      ENCRYPTION_SECRET: ${ENCRYPTION_SECRET:-8f4b2e9a1c7d3f6e5a0b4c8d2e6f1a3b9c5d7e0f2a4b6c8d1e3f5a7b9c0d2e4f}
+      JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-signing-key-phase-01-seo-automation-platform-2026}
+      DEFAULT_OLLAMA_BASE_URL: "http://ollama:11434"
+      N8N_BASE_URL: "http://n8n:5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  automation-worker:
+    build:
+      context: .
+      dockerfile: services/automation-worker/Dockerfile
+    container_name: seo_automation_worker
+    restart: unless-stopped
+    ports:
+      - "4100:4100"
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/seo_automation?schema=public"
+      ENCRYPTION_SECRET: ${ENCRYPTION_SECRET:-8f4b2e9a1c7d3f6e5a0b4c8d2e6f1a3b9c5d7e0f2a4b6c8d1e3f5a7b9c5d7e0}
+      WORKER_SHARED_SECRET: ${WORKER_SHARED_SECRET:-8f4b2e9a1c7d3f6e5a0b4c8d2e6f1a3b9c5d7e0f2a4b6c8d1e3f5a7b9c0d2e4f}
+      WORKER_ID: "docker-automation-worker-01"
+      WORKER_POLL_INTERVAL_MS: "10000"
+      DEFAULT_OLLAMA_BASE_URL: "http://ollama:11434"
+      N8N_BASE_URL: "http://n8n:5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  n8n_data:
+  ollama_data:

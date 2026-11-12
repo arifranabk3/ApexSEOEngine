@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "prisma generate && next build",
+  "functions": {
+    "src/app/api/v1/**/*.ts": {
+      "maxDuration": 30
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/v1/cron/enqueue-schedules",
+      "schedule": "0 * * * *"
+    }
+  ]
+}
+

@@ -1,0 +1,529 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// 1. AUTHENTICATION & RBAC
+// ============================================================================
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  websites     Website[]
+  articles     Article[] @relation("ArticleAuthor")
+  auditLogs    AuditLog[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+  @@index([roleId])
+}
+
+model Role {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  description String?
+  isSystem    Boolean      @default(false)
+  users       User[]
+  permissions Permission[] @relation("RolePermissions")
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([name])
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  module      String
+  action      String
+  description String?
+  roles       Role[]   @relation("RolePermissions")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([module, action])
+}
+
+// ============================================================================
+// 2. WEBSITE MANAGEMENT & INTEGRATIONS (MULTI-TENANT ISOLATION ROOT)
+// ============================================================================
+
+model Website {
+  id                   String               @id @default(uuid())
+  name                 String
+  url                  String               @unique
+  cmsType              String               @default("WORDPRESS")
+  status               String               @default("ACTIVE")
+  encryptedCredentials String?
+  publishingConfig     Json                 @default("{}")
+  seoConfig            Json                 @default("{}")
+  ownerId              String
+  owner                User                 @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  integrations         WebsiteIntegration[]
+  keywords             Keyword[]
+  keywordClusters      KeywordCluster[]
+  contentBriefs        ContentBrief[]
+  articles             Article[]
+  categories           Category[]
+  internalLinks        InternalLink[]
+  publishingJobs       PublishingJob[]
+  automationWorkflows  AutomationWorkflow[]
+  durableJobs          DurableJob[]
+  searchPerformances   SearchPerformance[]
+
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([cmsType])
+}
+
+model WebsiteIntegration {
+  id                   String    @id @default(uuid())
+  websiteId            String
+  website              Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  integrationType      String
+  name                 String
+  endpointUrl          String?
+  encryptedCredentials String?
+  config               Json      @default("{}")
+  status               String    @default("DISCONNECTED")
+  lastSyncedAt         DateTime?
+  lastError            String?
+
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([websiteId, integrationType])
+  @@index([websiteId])
+  @@index([status])
+}
+
+// ============================================================================
+// 3. AI PROVIDER & MODEL MANAGEMENT
+// ============================================================================
+
+model AIProvider {
+  id              String    @id @default(uuid())
+  name            String    @unique
+  providerType    String    @default("OLLAMA")
+  baseUrl         String
+  encryptedApiKey String?
+  isLocal         Boolean   @default(true)
+  isEnabled       Boolean   @default(true)
+  status          String    @default("UNTESTED")
+  lastCheckedAt   DateTime?
+  totalRequests   Int       @default(0)
+  totalTokens     Int       @default(0)
+  config          Json      @default("{}")
+
+  models          AIModel[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([providerType])
+  @@index([isEnabled])
+}
+
+model AIModel {
+  id            String     @id @default(uuid())
+  providerId    String
+  provider      AIProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  name          String
+  modelId       String
+  capabilities  Json       @default("[\"text\"]")
+  contextWindow Int        @default(8192)
+  temperature   Float      @default(0.7)
+  isDefault     Boolean    @default(false)
+  isEnabled     Boolean    @default(true)
+  totalRequests Int        @default(0)
+  totalTokens   Int        @default(0)
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@unique([providerId, modelId])
+  @@index([providerId])
+  @@index([isDefault])
+}
+
+// ============================================================================
+// 4. KEYWORD RESEARCH, CLUSTERING & CONTENT PLANNING
+// ============================================================================
+
+model KeywordCluster {
+  id            String         @id @default(uuid())
+  websiteId     String
+  website       Website        @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  name          String
+  pillarKeyword String
+  intent        String         @default("INFORMATIONAL")
+  status        String         @default("PLANNED")
+  keywords      Keyword[]
+  contentBriefs ContentBrief[]
+
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([websiteId])
+  @@index([status])
+}
+
+model Keyword {
+  id                 String              @id @default(uuid())
+  websiteId          String
+  website            Website             @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  clusterId          String?
+  cluster            KeywordCluster?     @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  term               String
+  searchIntent       String              @default("INFORMATIONAL")
+  searchVolume       Int                 @default(0)
+  difficulty         Float               @default(0)
+  cpc                Float               @default(0)
+  currentPosition    Float?
+  status             String              @default("TRACKED")
+  contentBriefs      ContentBrief[]
+  searchPerformances SearchPerformance[]
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([websiteId, term])
+  @@index([websiteId])
+  @@index([clusterId])
+  @@index([status])
+}
+
+model ContentBrief {
+  id                String          @id @default(uuid())
+  websiteId         String
+  website           Website         @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  keywordId         String?
+  keyword           Keyword?        @relation(fields: [keywordId], references: [id], onDelete: SetNull)
+  clusterId         String?
+  cluster           KeywordCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  title             String
+  targetWordCount   Int             @default(1500)
+  searchIntent      String          @default("INFORMATIONAL")
+  outline           Json            @default("[]")
+  secondaryKeywords Json            @default("[]")
+  competitorNotes   String?
+  status            String          @default("DRAFT")
+  articles          Article[]
+
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([websiteId])
+  @@index([keywordId])
+  @@index([status])
+}
+
+// ============================================================================
+// 5. CONTENT, VERSIONS, MEDIA, CATEGORIES, INTERNAL LINKING & PUBLISHING
+// ============================================================================
+
+model Category {
+  id          String     @id @default(uuid())
+  websiteId   String
+  website     Website    @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  description String?
+  parentId    String?
+  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryHierarchy")
+  articles    Article[]
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([websiteId, slug])
+  @@index([websiteId])
+}
+
+model Article {
+  id                 String              @id @default(uuid())
+  websiteId          String
+  website            Website             @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  categoryId         String?
+  category           Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  briefId            String?
+  brief              ContentBrief?       @relation(fields: [briefId], references: [id], onDelete: SetNull)
+  authorId           String?
+  author             User?               @relation("ArticleAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  title              String
+  slug               String
+  excerpt            String?
+  content            String
+  status             String              @default("DRAFT")
+  focusKeyword       String?
+  metaTitle          String?
+  metaDescription    String?
+  canonicalUrl       String?
+  seoScore           Int                 @default(0)
+  wordCount          Int                 @default(0)
+  externalPostId     String?
+  publishedUrl       String?
+  publishedAt        DateTime?
+
+  versions           ArticleVersion[]
+  images             ArticleImage[]
+  outgoingLinks      InternalLink[]      @relation("OutgoingArticleLinks")
+  incomingLinks      InternalLink[]      @relation("IncomingArticleLinks")
+  publishingJobs     PublishingJob[]
+  searchPerformances SearchPerformance[]
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([websiteId, slug])
+  @@index([websiteId, status])
+  @@index([categoryId])
+  @@index([briefId])
+}
+
+model ArticleVersion {
+  id            String   @id @default(uuid())
+  articleId     String
+  article       Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  versionNumber Int
+  title         String
+  content       String
+  metaTitle     String?
+  metaDesc      String?
+  changeSummary String?
+  createdBy     String?
+
+  createdAt     DateTime @default(now())
+
+  @@unique([articleId, versionNumber])
+  @@index([articleId])
+}
+
+model ArticleImage {
+  id         String   @id @default(uuid())
+  articleId  String
+  article    Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  url        String
+  altText    String
+  caption    String?
+  prompt     String?
+  provider   String   @default("LOCAL_GENERATOR")
+  isFeatured Boolean  @default(false)
+  width      Int      @default(1200)
+  height     Int      @default(630)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([articleId])
+}
+
+model InternalLink {
+  id              String   @id @default(uuid())
+  websiteId       String
+  website         Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  sourceArticleId String
+  sourceArticle   Article  @relation("OutgoingArticleLinks", fields: [sourceArticleId], references: [id], onDelete: Cascade)
+  targetArticleId String
+  targetArticle   Article  @relation("IncomingArticleLinks", fields: [targetArticleId], references: [id], onDelete: Cascade)
+  anchorText      String
+  targetUrl       String
+  status          String   @default("SUGGESTED")
+  relevanceScore  Float    @default(0.8)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([websiteId])
+  @@index([sourceArticleId])
+  @@index([targetArticleId])
+}
+
+model PublishingJob {
+  id           String    @id @default(uuid())
+  websiteId    String
+  website      Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  articleId    String
+  article      Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  cmsType      String
+  status       String    @default("QUEUED")
+  scheduledFor DateTime  @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  attempts     Int       @default(0)
+  maxAttempts  Int       @default(3)
+  remotePostId String?
+  publishedUrl String?
+  errorMessage String?
+  responseLog  Json      @default("{}")
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([websiteId, status])
+  @@index([articleId])
+  @@index([scheduledFor])
+}
+
+// ============================================================================
+// 6. AUTOMATION WORKFLOWS, EXECUTIONS & RETRY ENGINE
+// ============================================================================
+
+model AutomationWorkflow {
+  id                String                @id @default(uuid())
+  websiteId         String?
+  website           Website?              @relation(fields: [websiteId], references: [id], onDelete: SetNull)
+  name              String
+  slug              String                @unique
+  description       String?
+  workflowType      String                @default("N8N_WEBHOOK")
+  n8nWorkflowId     String?
+  webhookUrl        String?
+  scheduleCron      String?
+  isEnabled         Boolean               @default(true)
+  status            String                @default("IDLE")
+  maxRetries        Int                   @default(3)
+  retryBackoffMs    Int                   @default(5000)
+  config            Json                  @default("{}")
+  lastRunAt         DateTime?
+  nextRunAt         DateTime?
+
+  executions        AutomationExecution[]
+
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@index([websiteId])
+  @@index([status])
+  @@index([isEnabled])
+}
+
+model AutomationExecution {
+  id           String             @id @default(uuid())
+  workflowId   String
+  workflow     AutomationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  status       String             @default("RUNNING")
+  triggerSource String            @default("MANUAL")
+  attemptNumber Int               @default(1)
+  startedAt    DateTime           @default(now())
+  finishedAt   DateTime?
+  durationMs   Int?
+  inputPayload Json               @default("{}")
+  outputResult Json               @default("{}")
+  errorLog     String?
+
+  createdAt    DateTime           @default(now())
+
+  @@index([workflowId, status])
+  @@index([startedAt])
+}
+
+model DurableJob {
+  id              String    @id @default(uuid())
+  websiteId       String?
+  website         Website?  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  jobType         String
+  idempotencyKey  String    @unique
+  status          String    @default("QUEUED")
+  priority        Int       @default(10)
+  payload         Json      @default("{}")
+  result          Json?
+  errorLog        String?
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(3)
+  nextRetryAt     DateTime  @default(now())
+  lockedBy        String?
+  lockedUntil     DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, nextRetryAt, priority])
+  @@index([websiteId, jobType])
+  @@index([lockedUntil])
+}
+
+// ============================================================================
+// 7. SEARCH PERFORMANCE, SYSTEM SETTINGS & SECURITY AUDIT LOGS
+// ============================================================================
+
+model SearchPerformance {
+  id          String   @id @default(uuid())
+  websiteId   String
+  website     Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  articleId   String?
+  article     Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  keywordId   String?
+  keyword     Keyword? @relation(fields: [keywordId], references: [id], onDelete: SetNull)
+  pageUrl     String
+  query       String
+  date        DateTime
+  clicks      Int      @default(0)
+  impressions Int      @default(0)
+  ctr         Float    @default(0)
+  position    Float    @default(0)
+
+  createdAt   DateTime @default(now())
+
+  @@unique([websiteId, pageUrl, query, date])
+  @@index([websiteId, date])
+  @@index([articleId])
+  @@index([keywordId])
+}
+
+model SystemSetting {
+  id          String   @id @default(uuid())
+  category    String
+  key         String   @unique
+  value       Json
+  isSecret    Boolean  @default(false)
+  description String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  module     String
+  entityType String?
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  metadata   Json     @default("{}")
+
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([module, action])
+  @@index([createdAt])
+}

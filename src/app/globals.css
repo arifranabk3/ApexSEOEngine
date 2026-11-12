@@ -1,0 +1,135 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+    --surface-bg: #f8fafc;
+    --surface-card: rgba(255, 255, 255, 0.88);
+    --surface-border: rgba(226, 232, 240, 0.9);
+    --accent-primary: #2563eb;
+    --accent-glow: rgba(37, 99, 235, 0.14);
+    --scrollbar-thumb: #cbd5e1;
+    --scrollbar-track: #f1f5f9;
+  }
+
+  :root.dark {
+    color-scheme: dark;
+    --surface-bg: #070b14;
+    --surface-card: rgba(15, 23, 42, 0.78);
+    --surface-border: rgba(30, 41, 59, 0.85);
+    --accent-primary: #3b82f6;
+    --accent-glow: rgba(59, 130, 246, 0.18);
+    --scrollbar-thumb: #334155;
+    --scrollbar-track: #0f172a;
+  }
+
+  :root:not(.dark) {
+    color-scheme: light;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 dark:bg-[#070b14] dark:text-slate-100 antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@layer components {
+  .apex-mesh-bg {
+    background-image:
+      radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.09) 0px, transparent 48%),
+      radial-gradient(at 100% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 48%),
+      radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
+  }
+
+  .apex-card {
+    @apply rounded-2xl bg-white/90 dark:bg-slate-900/80 border border-slate-200/90 dark:border-slate-800/80 backdrop-blur-md shadow-sm transition-all duration-200;
+  }
+
+  .apex-card-hover {
+    @apply hover:border-blue-500/40 dark:hover:border-blue-500/40 hover:shadow-md hover:shadow-blue-500/5;
+  }
+
+  .apex-input {
+    @apply w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/90 border border-slate-300/80 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition;
+  }
+
+  .apex-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs shadow-sm shadow-blue-500/20 active:scale-[0.99] transition;
+  }
+
+  /* Responsive Table Pattern (modern-web-guidance: responsive-table) */
+  .table-wrapper {
+    overflow-x: auto;
+    max-block-size: 72vh;
+    border-radius: 0.875rem;
+    border: 1px solid var(--surface-border);
+  }
+
+  .table-wrapper:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
+  .apex-data-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    text-align: left;
+    font-size: 0.75rem;
+  }
+
+  .apex-data-table thead {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 2;
+  }
+
+  .apex-data-table th {
+    @apply bg-slate-100/95 dark:bg-slate-900/95 backdrop-blur px-4 py-3 font-semibold text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800 whitespace-nowrap;
+  }
+
+  .apex-data-table td {
+    @apply px-4 py-3.5 border-b border-slate-200/70 dark:border-slate-800/70 align-top;
+  }
+
+  .apex-data-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* Single-row Accessible Tabs Pattern (modern-web-guidance: tabs) */
+  .apex-tablist {
+    display: flex;
+    overflow-x: auto;
+    gap: 0.25rem;
+    border-block-end: 1px solid var(--surface-border);
+  }
+
+  .apex-tab {
+    position: relative;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 150ms ease;
+  }
+
+  .apex-tab[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0.5rem;
+    inset-block-end: 0;
+    border-block-end: 3px solid var(--accent-primary);
+  }
+}
