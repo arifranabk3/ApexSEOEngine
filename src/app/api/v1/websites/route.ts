@@ -1,7 +1,5 @@
 import { NextRequest } from "next/server";
-import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -11,12 +9,14 @@ import {
 } from "@/lib/api-response";
 import { encryptJsonCredentials, hasEncryptedCredentials } from "@/lib/crypto";
 import { recordAuditLog } from "@/lib/audit";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
+import { WebsiteCmsTypeSchema, WebsiteStatusSchema } from "@/repositories/website-repository.types";
 
 const createWebsiteSchema = z.object({
   name: z.string().min(2, "Website name must be at least 2 characters"),
   url: z.string().url("Website URL must be a valid URL"),
-  cmsType: z.enum(["WORDPRESS", "CUSTOM_REST", "GHOST", "WEBFLOW", "HEADLESS"]).default("WORDPRESS"),
-  status: z.enum(["ACTIVE", "PAUSED", "MAINTENANCE"]).default("ACTIVE"),
+  cmsType: WebsiteCmsTypeSchema.default("WORDPRESS"),
+  status: WebsiteStatusSchema.default("ACTIVE"),
   credentials: z
     .object({
       username: z.string().optional(),
@@ -44,23 +44,12 @@ const createWebsiteSchema = z.object({
 
 export async function GET(req: NextRequest) {
   await ensureSystemSeeded();
-  const { errorResponse } = await requireApiAuth(req, "websites:read");
-  if (errorResponse) return errorResponse;
+  const { user, errorResponse } = await requireApiAuth(req, "websites:read");
+  if (errorResponse || !user) return errorResponse!;
 
-  const db = await getDb();
-  const websites = await db.website.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
-      _count: {
-        select: {
-          articles: true,
-          keywords: true,
-          categories: true,
-          integrations: true
-        }
-      }
-    }
-  });
+  const repo = getWebsiteRepository();
+  const ownerFilter = user.roleName === "SUPER_ADMIN" ? undefined : user.id;
+  const websites = await repo.listWebsites(ownerFilter);
 
   const sanitized = websites.map((w) => ({
     id: w.id,
@@ -71,7 +60,7 @@ export async function GET(req: NextRequest) {
     credentialsConfigured: hasEncryptedCredentials(w.encryptedCredentials),
     publishingConfig: w.publishingConfig,
     seoConfig: w.seoConfig,
-    counts: w._count,
+    counts: w.counts,
     createdAt: w.createdAt,
     updatedAt: w.updatedAt
   }));
@@ -90,8 +79,8 @@ export async function POST(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
-  const existing = await db.website.findUnique({ where: { url: data.url } });
+  const repo = getWebsiteRepository();
+  const existing = await repo.findWebsiteByUrl(data.url);
   if (existing) {
     return apiError(
       "DUPLICATE_WEBSITE_URL",
@@ -105,26 +94,24 @@ export async function POST(req: NextRequest) {
       ? encryptJsonCredentials(data.credentials)
       : null;
 
-  const created = await db.website.create({
-    data: {
-      name: data.name,
-      url: data.url,
-      cmsType: data.cmsType,
-      status: data.status,
-      ownerId: user.id,
-      encryptedCredentials,
-      publishingConfig: (data.publishingConfig || {
-        defaultStatus: "draft",
-        autoPublishApproved: false,
-        requireFeaturedImage: true
-      }) as Prisma.InputJsonValue,
-      seoConfig: (data.seoConfig || {
-        defaultAuthor: "Editorial Team",
-        requireSearchIntentAlignment: true,
-        requireSourceCitations: true,
-        enforceHelpfulContentGate: true
-      }) as Prisma.InputJsonValue
-    }
+  const created = await repo.createWebsite({
+    name: data.name,
+    url: data.url,
+    cmsType: data.cmsType,
+    status: data.status,
+    ownerId: user.id,
+    encryptedCredentials,
+    publishingConfig: (data.publishingConfig || {
+      defaultStatus: "draft",
+      autoPublishApproved: false,
+      requireFeaturedImage: true
+    }) as Record<string, unknown>,
+    seoConfig: (data.seoConfig || {
+      defaultAuthor: "Editorial Team",
+      requireSearchIntentAlignment: true,
+      requireSourceCitations: true,
+      enforceHelpfulContentGate: true
+    }) as Record<string, unknown>
   });
 
   await recordAuditLog({

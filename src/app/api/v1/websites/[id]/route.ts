@@ -1,7 +1,5 @@
 import { NextRequest } from "next/server";
-import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import {
   apiError,
   apiSuccess,
@@ -15,12 +13,14 @@ import {
 } from "@/lib/crypto";
 import { recordAuditLog } from "@/lib/audit";
 import { createCmsAdapter } from "@/services/cms/cms-adapter";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
+import { WebsiteCmsTypeSchema, WebsiteStatusSchema } from "@/repositories/website-repository.types";
 
 const updateWebsiteSchema = z.object({
   name: z.string().min(2).optional(),
   url: z.string().url().optional(),
-  cmsType: z.enum(["WORDPRESS", "CUSTOM_REST", "GHOST", "WEBFLOW", "HEADLESS"]).optional(),
-  status: z.enum(["ACTIVE", "PAUSED", "MAINTENANCE"]).optional(),
+  cmsType: WebsiteCmsTypeSchema.optional(),
+  status: WebsiteStatusSchema.optional(),
   credentials: z
     .object({
       username: z.string().optional(),
@@ -48,10 +48,15 @@ export async function PATCH(
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
-  const existing = await db.website.findUnique({ where: { id } });
+  const repo = getWebsiteRepository();
+  const existing = await repo.findWebsiteById(id);
   if (!existing) {
     return apiError("WEBSITE_NOT_FOUND", "Website not found", 404);
+  }
+
+  // Tenant isolation check
+  if (user.roleName !== "SUPER_ADMIN" && existing.ownerId !== user.id) {
+    return apiError("FORBIDDEN", "You do not have permission to modify this website", 403);
   }
 
   if (data.testConnection) {
@@ -70,19 +75,19 @@ export async function PATCH(
       ? encryptJsonCredentials(data.credentials)
       : existing.encryptedCredentials;
 
-  const updated = await db.website.update({
-    where: { id },
-    data: {
-      name: data.name ?? existing.name,
-      url: data.url ?? existing.url,
-      cmsType: data.cmsType ?? existing.cmsType,
-      status: data.status ?? existing.status,
-      encryptedCredentials,
-      publishingConfig: (data.publishingConfig ??
-        existing.publishingConfig) as Prisma.InputJsonValue,
-      seoConfig: (data.seoConfig ?? existing.seoConfig) as Prisma.InputJsonValue
-    }
+  const updated = await repo.updateWebsite(id, {
+    name: data.name,
+    url: data.url,
+    cmsType: data.cmsType,
+    status: data.status,
+    encryptedCredentials,
+    publishingConfig: data.publishingConfig,
+    seoConfig: data.seoConfig
   });
+
+  if (!updated) {
+    return apiError("UPDATE_FAILED", "Failed to update website record", 500);
+  }
 
   await recordAuditLog({
     userId: user.id,
@@ -114,13 +119,18 @@ export async function DELETE(
   if (errorResponse || !user) return errorResponse!;
 
   const { id } = await context.params;
-  const db = await getDb();
-  const existing = await db.website.findUnique({ where: { id } });
+  const repo = getWebsiteRepository();
+  const existing = await repo.findWebsiteById(id);
   if (!existing) {
     return apiError("WEBSITE_NOT_FOUND", "Website not found", 404);
   }
 
-  await db.website.delete({ where: { id } });
+  // Tenant isolation check
+  if (user.roleName !== "SUPER_ADMIN" && existing.ownerId !== user.id) {
+    return apiError("FORBIDDEN", "You do not have permission to delete this website", 403);
+  }
+
+  await repo.deleteWebsite(id);
 
   await recordAuditLog({
     userId: user.id,

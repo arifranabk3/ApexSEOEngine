@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiSuccess,
@@ -12,14 +11,16 @@ import {
   hasEncryptedCredentials
 } from "@/lib/crypto";
 import { recordAuditLog } from "@/lib/audit";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
+import { WebsiteIntegrationTypeSchema, WebsiteIntegrationStatusSchema } from "@/repositories/website-repository.types";
 
 const upsertIntegrationSchema = z.object({
   websiteId: z.string().min(1),
-  integrationType: z.enum(["WORDPRESS", "GSC", "GA4", "N8N", "CUSTOM_CMS"]),
+  integrationType: WebsiteIntegrationTypeSchema,
   name: z.string().min(2),
   endpointUrl: z.string().optional(),
   credentials: z.record(z.unknown()).optional(),
-  status: z.enum(["CONFIGURED", "CONNECTED", "DISCONNECTED"]).default("CONFIGURED")
+  status: WebsiteIntegrationStatusSchema.default("CONFIGURED")
 });
 
 export async function GET(req: NextRequest) {
@@ -27,13 +28,8 @@ export async function GET(req: NextRequest) {
   const { errorResponse } = await requireApiAuth(req);
   if (errorResponse) return errorResponse;
 
-  const db = await getDb();
-  const integrations = await db.websiteIntegration.findMany({
-    orderBy: { updatedAt: "desc" },
-    include: {
-      website: { select: { id: true, name: true, url: true } }
-    }
-  });
+  const repo = getWebsiteRepository();
+  const integrations = await repo.listIntegrations();
 
   const sanitized = integrations.map((item) => ({
     id: item.id,
@@ -67,28 +63,14 @@ export async function POST(req: NextRequest) {
       ? encryptJsonCredentials(data.credentials)
       : undefined;
 
-  const db = await getDb();
-  const record = await db.websiteIntegration.upsert({
-    where: {
-      websiteId_integrationType: {
-        websiteId: data.websiteId,
-        integrationType: data.integrationType
-      }
-    },
-    update: {
-      name: data.name,
-      endpointUrl: data.endpointUrl || null,
-      ...(encryptedCredentials ? { encryptedCredentials } : {}),
-      status: data.status
-    },
-    create: {
-      websiteId: data.websiteId,
-      integrationType: data.integrationType,
-      name: data.name,
-      endpointUrl: data.endpointUrl || null,
-      encryptedCredentials: encryptedCredentials || null,
-      status: data.status
-    }
+  const repo = getWebsiteRepository();
+  const record = await repo.upsertIntegration({
+    websiteId: data.websiteId,
+    integrationType: data.integrationType,
+    name: data.name,
+    endpointUrl: data.endpointUrl || null,
+    encryptedCredentials: encryptedCredentials || null,
+    status: data.status
   });
 
   await recordAuditLog({
