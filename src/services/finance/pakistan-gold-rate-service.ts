@@ -3,10 +3,12 @@
  *
  * Fetches, normalizes, and caches real-time Pakistan gold prices via Sarafa.pk Developer API.
  * Features:
- * - 15-minute two-tier cache (In-memory L1 + PostgreSQL SystemSetting L2 for cross-instance safety on Vercel)
- * - Single-flight concurrent request deduplication to prevent stampedes
+ * - 15-minute two-tier cache (In-memory L1 + MongoDB SystemSetting L2 for cross-instance safety)
+ * - Distributed atomic locking in MongoDB to prevent cross-instance refresh stampedes
+ * - Single-flight concurrent request deduplication to prevent intra-process stampedes
  * - Rate-limit quota header tracking (< 5 remaining stops outbound calls and serves stale data)
- * - Strict Zod validation and safe fallback responses
+ * - Persistent quota awareness across distributed server instances
+ * - Strict Zod validation and safe stale fallback responses
  * - Zero exposed secrets; server-side only
  */
 
@@ -25,6 +27,7 @@ import {
 const SARAFA_BASE_URL = "https://api.sarafa.pk";
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const MIN_SAFE_QUOTA_REMAINING = 5; // Reserve threshold to avoid hitting hard limit (100 req/day)
+const DISTRIBUTED_LOCK_TTL_MS = 30 * 1000; // 30 seconds distributed refresh lock
 
 // L1: In-memory cache entry
 interface CacheEntry {
@@ -34,7 +37,7 @@ interface CacheEntry {
 }
 const memoryCache = new Map<SupportedCitySlug, CacheEntry>();
 
-// Concurrency in-flight deduplication map
+// Concurrency in-flight deduplication map (process-level)
 const inFlightRequests = new Map<SupportedCitySlug, Promise<PakistanGoldRatesResult>>();
 
 // Global in-memory quota tracking
@@ -156,6 +159,84 @@ async function setPersistentCache(
 }
 
 /**
+ * Persistent distributed lock management for cross-instance refresh coordination.
+ */
+async function acquireDistributedRefreshLock(citySlug: SupportedCitySlug): Promise<boolean> {
+  try {
+    const systemRepo = getSystemRepository();
+    const lockKey = `gold_rates_lock_${citySlug}`;
+    const now = Date.now();
+    const existing = await systemRepo.findSettingByKey(lockKey);
+
+    if (existing && existing.value && typeof existing.value === "object") {
+      const lockVal = existing.value as { lockedUntilMs?: number };
+      if (typeof lockVal.lockedUntilMs === "number" && now < lockVal.lockedUntilMs) {
+        // Lock currently active on another instance
+        return false;
+      }
+    }
+
+    // Acquire or take over expired lock
+    await systemRepo.upsertSetting({
+      category: "FINANCE_LOCK",
+      key: lockKey,
+      value: { lockedUntilMs: now + DISTRIBUTED_LOCK_TTL_MS, lockedAtMs: now },
+      description: `Distributed refresh lock for ${citySlug}`
+    });
+    return true;
+  } catch {
+    // If distributed lock fails (e.g. database offline), permit flight on this process
+    return true;
+  }
+}
+
+async function releaseDistributedRefreshLock(citySlug: SupportedCitySlug): Promise<void> {
+  try {
+    const systemRepo = getSystemRepository();
+    const lockKey = `gold_rates_lock_${citySlug}`;
+    await systemRepo.deleteSettingByKey(lockKey);
+  } catch {
+    // silent
+  }
+}
+
+/**
+ * Persistent quota tracking to share remaining quota state across instances.
+ */
+async function getPersistentRemainingQuota(): Promise<number | null> {
+  if (lastKnownRemainingQuota !== null) return lastKnownRemainingQuota;
+  try {
+    const systemRepo = getSystemRepository();
+    const setting = await systemRepo.findSettingByKey("gold_rates_quota_state");
+    if (setting && setting.value && typeof setting.value === "object") {
+      const val = setting.value as { remaining?: number };
+      if (typeof val.remaining === "number") {
+        lastKnownRemainingQuota = val.remaining;
+        return val.remaining;
+      }
+    }
+  } catch {
+    // silent
+  }
+  return null;
+}
+
+async function setPersistentRemainingQuota(remaining: number): Promise<void> {
+  lastKnownRemainingQuota = remaining;
+  try {
+    const systemRepo = getSystemRepository();
+    await systemRepo.upsertSetting({
+      category: "FINANCE_QUOTA",
+      key: "gold_rates_quota_state",
+      value: { remaining, updatedAtMs: Date.now() },
+      description: "Cross-instance persistent quota tracker"
+    });
+  } catch {
+    // silent
+  }
+}
+
+/**
  * Main function to fetch Pakistan gold rates for a city.
  */
 export async function getPakistanGoldRates(
@@ -194,26 +275,42 @@ export async function getPakistanGoldRates(
     }
   }
 
-  // 3. Single-flight concurrent deduplication
+  // 3. Single-flight concurrent deduplication (intra-process)
   const existingInFlight = inFlightRequests.get(citySlug);
   if (existingInFlight) {
     return existingInFlight;
   }
 
-  // 4. Check if quota exhausted or reserved
-  if (lastKnownRemainingQuota !== null && lastKnownRemainingQuota <= MIN_SAFE_QUOTA_REMAINING) {
+  // 4. Check if quota exhausted or reserved (cross-instance check)
+  const effectiveQuota = await getPersistentRemainingQuota();
+  if (effectiveQuota !== null && effectiveQuota <= MIN_SAFE_QUOTA_REMAINING) {
     const fallback = memCached || (await getPersistentCache(citySlug));
     if (fallback) {
       return {
         ...fallback.data,
         isStale: true,
-        staleReason: `Provider daily quota threshold reached (${lastKnownRemainingQuota} remaining). Serving cached data to avoid service disruption.`,
-        remainingDailyQuota: lastKnownRemainingQuota
+        staleReason: `Provider daily quota threshold reached (${effectiveQuota} remaining). Serving cached data to avoid service disruption.`,
+        remainingDailyQuota: effectiveQuota
       };
     }
   }
 
-  // 5. Initiate outbound fetch
+  // 5. Distributed cross-instance refresh coordination
+  const acquiredLock = await acquireDistributedRefreshLock(citySlug);
+  if (!acquiredLock) {
+    // Another instance is actively refreshing. Serve cached data if present to avoid duplicate calls.
+    const fallback = memCached || (await getPersistentCache(citySlug));
+    if (fallback) {
+      return {
+        ...fallback.data,
+        isStale: true,
+        staleReason: "Another instance is actively refreshing gold rates. Serving cached data.",
+        remainingDailyQuota: effectiveQuota
+      };
+    }
+  }
+
+  // 6. Initiate outbound fetch
   const fetchPromise = (async () => {
     try {
       const apiKey = process.env.SARAFA_API_KEY;
@@ -269,12 +366,12 @@ export async function getPakistanGoldRates(
       if (remainingHdr) {
         const parsedQuota = parseInt(remainingHdr, 10);
         if (!isNaN(parsedQuota)) {
-          lastKnownRemainingQuota = parsedQuota;
+          await setPersistentRemainingQuota(parsedQuota);
         }
       }
 
       if (res.status === 429) {
-        lastKnownRemainingQuota = 0;
+        await setPersistentRemainingQuota(0);
         const fallback = memCached || (await getPersistentCache(citySlug));
         if (fallback) {
           return {
@@ -335,7 +432,7 @@ export async function getPakistanGoldRates(
 
       return normalized;
     } catch (err: unknown) {
-      // On network failure or timeout, fallback to existing cache if available
+      // On network failure or timeout, fallback to existing cache if available without destroying it
       const fallback = memCached || (await getPersistentCache(citySlug));
       if (fallback) {
         return {
@@ -347,6 +444,7 @@ export async function getPakistanGoldRates(
       throw err;
     } finally {
       inFlightRequests.delete(citySlug);
+      await releaseDistributedRefreshLock(citySlug);
     }
   })();
 
@@ -364,6 +462,8 @@ export async function resetGoldRateCacheForTesting(): Promise<void> {
   try {
     const systemRepo = getSystemRepository();
     await systemRepo.deleteSettingsByCategory("FINANCE_CACHE");
+    await systemRepo.deleteSettingsByCategory("FINANCE_LOCK");
+    await systemRepo.deleteSettingsByCategory("FINANCE_QUOTA");
   } catch {
     // silent
   }
