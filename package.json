@@ -19,13 +19,14 @@
     "worker:start": "tsx services/automation-worker/worker-server.ts"
   },
   "dependencies": {
+    "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
     "jose": "^5.9.6",
     "lucide-react": "^0.460.0",
+    "mongodb": "^7.9.0",
     "next": "^15.1.0",
     "pg": "^8.13.1",
-    "@prisma/client": "^5.22.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^2.5.5",

@@ -35,6 +35,15 @@ const actionSchema = z.discriminatedUnion("action", [
     providerId: z.string().min(1)
   }),
   z.object({
+    action: z.literal("discover_models"),
+    providerId: z.string().min(1)
+  }),
+  z.object({
+    action: z.literal("verify_model"),
+    providerId: z.string().min(1),
+    modelId: z.string().min(1)
+  }),
+  z.object({
     action: z.literal("add_model"),
     providerId: z.string().min(1),
     name: z.string().min(1),
@@ -189,6 +198,83 @@ export async function PATCH(req: NextRequest) {
     });
 
     return apiSuccess({ testResult: result });
+  }
+
+  if (data.action === "discover_models") {
+    const provider = await db.aIProvider.findUnique({
+      where: { id: data.providerId }
+    });
+    if (!provider) {
+      return apiError("PROVIDER_NOT_FOUND", "AI provider not found", 404);
+    }
+
+    const decryptedKey = provider.encryptedApiKey
+      ? decryptSecret(provider.encryptedApiKey)
+      : null;
+
+    const adapter = createAIAdapter({
+      providerType: provider.providerType,
+      baseUrl: provider.baseUrl,
+      apiKey: decryptedKey,
+      name: provider.name
+    });
+
+    if (!adapter.listModelsDetailed) {
+      const basic = await adapter.testConnection();
+      return apiSuccess({
+        providerId: provider.id,
+        models: basic.availableModels.map((m) => ({ name: m, model: m, size: 0 }))
+      });
+    }
+
+    try {
+      const detailedModels = await adapter.listModelsDetailed();
+      return apiSuccess({
+        providerId: provider.id,
+        models: detailedModels
+      });
+    } catch (err) {
+      return apiError(
+        "MODEL_DISCOVERY_FAILED",
+        err instanceof Error ? err.message : "Failed to discover models from provider",
+        502
+      );
+    }
+  }
+
+  if (data.action === "verify_model") {
+    const provider = await db.aIProvider.findUnique({
+      where: { id: data.providerId }
+    });
+    if (!provider) {
+      return apiError("PROVIDER_NOT_FOUND", "AI provider not found", 404);
+    }
+
+    const decryptedKey = provider.encryptedApiKey
+      ? decryptSecret(provider.encryptedApiKey)
+      : null;
+
+    const adapter = createAIAdapter({
+      providerType: provider.providerType,
+      baseUrl: provider.baseUrl,
+      apiKey: decryptedKey,
+      name: provider.name
+    });
+
+    if (adapter.checkModelAvailable) {
+      const check = await adapter.checkModelAvailable(data.modelId);
+      return apiSuccess(check);
+    }
+
+    const test = await adapter.testConnection();
+    const available = test.availableModels.includes(data.modelId);
+    return apiSuccess({
+      available,
+      modelId: data.modelId,
+      message: available
+        ? `Model ${data.modelId} available`
+        : `Model ${data.modelId} not found in provider models`
+    });
   }
 
   if (data.action === "add_model") {
