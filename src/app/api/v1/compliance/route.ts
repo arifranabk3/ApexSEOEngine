@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -24,6 +23,7 @@ import {
   GOOGLE_POLICY_REGISTRY
 } from "@/services/compliance/traffic-and-policy-monitor";
 import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 
 const complianceAuditRequestSchema = z.object({
@@ -91,29 +91,29 @@ export async function GET(req: NextRequest) {
   const { errorResponse } = await requireApiAuth(req, "content:read");
   if (errorResponse) return errorResponse;
 
-  const db = await getDb();
+  const websiteRepo = getWebsiteRepository();
   const requestedSiteId = req.nextUrl.searchParams.get("websiteId");
 
   const website = requestedSiteId
-    ? await db.website.findUnique({
-        where: { id: requestedSiteId },
-        include: {
-          articles: { orderBy: { updatedAt: "desc" } },
-          categories: true
-        }
-      })
-    : await db.website.findFirst({
-        include: {
-          articles: { orderBy: { updatedAt: "desc" } },
-          categories: true
-        }
-      });
+    ? await websiteRepo.findWebsiteById(requestedSiteId)
+    : (await websiteRepo.listWebsites())[0] || null;
 
   if (!website) {
     return apiError("WEBSITE_NOT_FOUND", "Target website not found", 404);
   }
 
-  const primaryArticle = website.articles[0];
+  const articleRepo = getArticleRepository();
+  const keywordRepo = getKeywordDomainRepository();
+
+  const [articles, categories] = await Promise.all([
+    articleRepo.findArticlesByWebsite(website.id, {
+      orderBy: "updatedAt",
+      orderDir: "desc"
+    }),
+    keywordRepo.findCategoriesByWebsite(website.id)
+  ]);
+
+  const primaryArticle = articles[0];
   const sampleHtml =
     primaryArticle?.content ||
     `<!DOCTYPE html><html lang="en-US"><head><meta name="viewport" content="width=device-width, initial-scale=1" /><link rel="canonical" href="${website.url}/sample" /></head><body><main><article><h1>${
@@ -152,10 +152,10 @@ export async function GET(req: NextRequest) {
     websiteId: website.id,
     websiteName: website.name,
     websiteUrl: website.url,
-    publishedOriginalArticleCount: website.articles.filter(
+    publishedOriginalArticleCount: articles.filter(
       (a) => a.status === "PUBLISHED"
     ).length,
-    categoryCount: website.categories.length,
+    categoryCount: categories.length,
     brokenPageCount: 0,
     searchComplianceInput: {
       technical: {
@@ -216,7 +216,7 @@ export async function GET(req: NextRequest) {
       websiteReadiness: readinessReport,
       trafficQuality: trafficReport,
       policyUpdates: GOOGLE_POLICY_REGISTRY,
-      publishingApprovals: website.articles.map((a) => ({
+      publishingApprovals: articles.map((a) => ({
         articleId: a.id,
         title: a.title,
         slug: a.slug,

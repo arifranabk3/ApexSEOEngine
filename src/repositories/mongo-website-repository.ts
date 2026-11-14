@@ -126,6 +126,13 @@ export class MongoWebsiteRepository implements IWebsiteRepository {
     return results;
   }
 
+  async countWebsites(ownerId?: string): Promise<number> {
+    const db = await getMongoDb();
+    const query: Record<string, unknown> = {};
+    if (ownerId) query.ownerId = ownerId;
+    return db.collection("websites").countDocuments(query);
+  }
+
   async createWebsite(input: CreateWebsiteInput): Promise<WebsiteEntity> {
     const db = await getMongoDb();
     const now = new Date();

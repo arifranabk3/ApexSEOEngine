@@ -123,6 +123,7 @@ export interface IWebsiteRepository {
   findWebsiteById(id: string): Promise<WebsiteEntity | null>;
   findWebsiteByUrl(url: string): Promise<WebsiteEntity | null>;
   listWebsites(ownerId?: string): Promise<WebsiteWithCounts[]>;
+  countWebsites(ownerId?: string): Promise<number>;
   createWebsite(input: CreateWebsiteInput): Promise<WebsiteEntity>;
   updateWebsite(id: string, input: UpdateWebsiteInput): Promise<WebsiteEntity | null>;
   deleteWebsite(id: string): Promise<boolean>;

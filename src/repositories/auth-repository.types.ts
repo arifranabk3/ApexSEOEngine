@@ -61,14 +61,40 @@ export interface CreateUserInput {
   websiteIds?: string[];
 }
 
+export interface CreatePermissionInput {
+  code: string;
+  module: string;
+  action: string;
+  description?: string;
+}
+
+export interface CreateRoleInput {
+  name: string;
+  description?: string;
+  isSystem?: boolean;
+  permissionCodes: string[];
+}
+
+export interface UpdateUserInput {
+  name?: string;
+  isActive?: boolean;
+  mustChangePassword?: boolean;
+  roleId?: string;
+  websiteIds?: string[];
+}
+
 export interface IAuthRepository {
   findUserByEmail(email: string): Promise<AuthenticatedUserRecord | null>;
   findUserById(id: string): Promise<AuthenticatedUserRecord | null>;
   createUser(input: CreateUserInput): Promise<UserEntity>;
+  updateUser?(id: string, updates: UpdateUserInput): Promise<UserEntity | null>;
+  countUsers?(): Promise<number>;
   updatePassword(id: string, newPasswordHash: string, nextTokenVersion: number): Promise<void>;
   updateLastLogin(id: string, date: Date): Promise<void>;
   getRoleById(roleId: string): Promise<RoleWithPermissions | null>;
   getRoleByName(name: string): Promise<RoleWithPermissions | null>;
+  upsertRole?(input: CreateRoleInput): Promise<RoleWithPermissions>;
+  upsertPermission?(input: CreatePermissionInput): Promise<PermissionEntity>;
   verifyTenantAccess(userId: string, websiteId: string): Promise<boolean>;
   ensureIndexes?(): Promise<void>;
 }

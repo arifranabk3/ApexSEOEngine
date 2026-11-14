@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import {
   hashPassword,
   verifyPassword,
@@ -15,6 +14,7 @@ import {
 } from "@/lib/api-response";
 import { recordAuditLog } from "@/lib/audit";
 import { ensureSystemSeeded } from "@/lib/seed-service";
+import { getAuthRepository } from "@/repositories/auth-repository.factory";
 
 const changePasswordSchema = z
   .object({
@@ -48,15 +48,14 @@ export async function POST(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
-  const dbUser = await db.user.findUnique({
-    where: { id: user.id },
-    include: { role: { include: { permissions: true } } }
-  });
+  const authRepo = getAuthRepository();
+  const authRecord = await authRepo.findUserById(user.id);
 
-  if (!dbUser || !dbUser.isActive) {
+  if (!authRecord || !authRecord.user.isActive) {
     return apiError("USER_NOT_FOUND", "User account not found or inactive", 404);
   }
+
+  const dbUser = authRecord.user;
 
   const isCurrentValid = await verifyPassword(
     data.currentPassword,
@@ -76,23 +75,14 @@ export async function POST(req: NextRequest) {
   const nextTokenVersion = (dbUser.tokenVersion ?? 0) + 1;
 
   // Update password, clear mandatory rotation flag, and bump tokenVersion to invalidate all existing sessions
-  const updatedUser = await db.user.update({
-    where: { id: user.id },
-    data: {
-      passwordHash: newHash,
-      mustChangePassword: false,
-      tokenVersion: nextTokenVersion,
-      passwordChangedAt: new Date()
-    },
-    include: { role: { include: { permissions: true } } }
-  });
+  await authRepo.updatePassword(user.id, newHash, nextTokenVersion);
 
   await recordAuditLog({
     userId: user.id,
     action: "AUTH_PASSWORD_CHANGED",
     module: "auth",
     metadata: {
-      email: updatedUser.email,
+      email: dbUser.email,
       tokenVersion: nextTokenVersion,
       sessionsRevoked: true
     }
@@ -100,11 +90,11 @@ export async function POST(req: NextRequest) {
 
   // Issue fresh session token with updated tokenVersion for the active client
   const freshSessionUser = {
-    id: updatedUser.id,
-    email: updatedUser.email,
-    name: updatedUser.name,
-    roleName: updatedUser.role.name,
-    permissions: updatedUser.role.permissions.map((p) => p.code),
+    id: dbUser.id,
+    email: dbUser.email,
+    name: dbUser.name,
+    roleName: authRecord.role.name,
+    permissions: authRecord.permissions,
     tokenVersion: nextTokenVersion,
     mustChangePassword: false
   };

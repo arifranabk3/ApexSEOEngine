@@ -1,6 +1,9 @@
-import { getDb } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { encryptJsonCredentials, encryptSecret } from "@/lib/crypto";
+import { getAuthRepository } from "@/repositories/auth-repository.factory";
+import { RoleWithPermissions } from "@/repositories/auth-repository.types";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
+import { WebsiteEntity } from "@/repositories/website-repository.types";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 import { getContentBriefRepository } from "@/repositories/content-brief-repository.factory";
@@ -35,99 +38,65 @@ export async function ensureSystemSeeded(): Promise<void> {
   }
 
   seedPromise = (async () => {
-    const db = await getDb();
+    const authRepo = getAuthRepository();
+    const websiteRepo = getWebsiteRepository();
 
-    // 1. Seed Permissions
-    for (const perm of DEFAULT_PERMISSIONS) {
-      await db.permission.upsert({
-        where: { code: perm.code },
-        update: {},
-        create: perm
-      });
+    // 1. Seed Permissions in Auth Repository
+    if (authRepo.upsertPermission) {
+      for (const perm of DEFAULT_PERMISSIONS) {
+        await authRepo.upsertPermission(perm);
+      }
     }
 
-    const allPermissions = await db.permission.findMany();
-
-    // 2. Seed Roles
-    const superAdminRole = await db.role.upsert({
-      where: { name: "SUPER_ADMIN" },
-      update: {},
-      create: {
+    // 2. Seed Roles in Auth Repository
+    let superAdminRole: RoleWithPermissions | null = null;
+    if (authRepo.upsertRole) {
+      superAdminRole = await authRepo.upsertRole({
         name: "SUPER_ADMIN",
         description: "Full administrative access across all modules and system settings",
         isSystem: true,
-        permissions: {
-          connect: allPermissions.map((p) => ({ id: p.id }))
-        }
-      }
-    });
+        permissionCodes: DEFAULT_PERMISSIONS.map((p) => p.code)
+      });
 
-    await db.role.upsert({
-      where: { name: "EDITOR" },
-      update: {
-        permissions: {
-          set: allPermissions
-            .filter((p) => p.module === "content" || (p.action === "read" && p.module !== "settings"))
-            .map((p) => ({ id: p.id }))
-        }
-      },
-      create: {
+      await authRepo.upsertRole({
         name: "EDITOR",
         description: "Manage content, keywords, and publishing pipelines",
         isSystem: true,
-        permissions: {
-          connect: allPermissions
-            .filter((p) => p.module === "content" || (p.action === "read" && p.module !== "settings"))
-            .map((p) => ({ id: p.id }))
-        }
-      }
-    });
+        permissionCodes: DEFAULT_PERMISSIONS
+          .filter((p) => p.module === "content" || (p.action === "read" && p.module !== "settings"))
+          .map((p) => p.code)
+      });
 
-    await db.role.upsert({
-      where: { name: "VIEWER" },
-      update: {
-        permissions: {
-          set: allPermissions
-            .filter((p) => p.action === "read" && p.module !== "settings")
-            .map((p) => ({ id: p.id }))
-        }
-      },
-      create: {
+      await authRepo.upsertRole({
         name: "VIEWER",
         description: "Read-only access to dashboards and reports",
         isSystem: true,
-        permissions: {
-          connect: allPermissions
-            .filter((p) => p.action === "read" && p.module !== "settings")
-            .map((p) => ({ id: p.id }))
-        }
-      }
-    });
+        permissionCodes: DEFAULT_PERMISSIONS
+          .filter((p) => p.action === "read" && p.module !== "settings")
+          .map((p) => p.code)
+      });
+    }
 
     // 3. Seed Default Admin User
     const adminEmail = "admin@apexseo.local";
-    let adminUser = await db.user.findUnique({ where: { email: adminEmail } });
+    const adminRecord = await authRepo.findUserByEmail(adminEmail);
+    let adminUser = adminRecord ? adminRecord.user : null;
+
     if (!adminUser) {
       const initialPassword = process.env.INITIAL_ADMIN_PASSWORD || "Admin@12345";
       const passwordHash = await hashPassword(initialPassword);
-      adminUser = await db.user.create({
-        data: {
-          email: adminEmail,
-          name: "Principal SEO Architect",
-          passwordHash,
-          isActive: true,
-          mustChangePassword: true, // Mandatory password rotation on first login
-          tokenVersion: 0,
-          roleId: superAdminRole.id
-        }
+      const roleId = superAdminRole ? superAdminRole.role.id : "role_super_admin";
+
+      adminUser = await authRepo.createUser({
+        email: adminEmail,
+        name: "Principal SEO Architect",
+        passwordHash,
+        isActive: true,
+        mustChangePassword: true,
+        roleId
       });
-    } else if (adminUser.passwordChangedAt === null && !adminUser.mustChangePassword) {
-      // If admin was seeded prior to the security hardening migration and has never changed password,
-      // enforce the mandatory password rotation requirement
-      adminUser = await db.user.update({
-        where: { id: adminUser.id },
-        data: { mustChangePassword: true }
-      });
+    } else if (adminUser.passwordChangedAt === null && !adminUser.mustChangePassword && authRepo.updateUser) {
+      adminUser = await authRepo.updateUser(adminUser.id, { mustChangePassword: true });
     }
 
     // 4. Seed Default Local Ollama AI Provider (Zero-Cost Policy) via Mongo Repository
@@ -169,65 +138,63 @@ export async function ensureSystemSeeded(): Promise<void> {
     });
 
     // 5. Seed Default Primary Website & Categories if none exist
-    const websiteCount = await db.website.count();
-    if (websiteCount === 0) {
-      const primaryWebsite = await db.website.create({
-        data: {
-          name: "Apex Tech Journal",
-          url: "https://apextech.example.com",
-          cmsType: "WORDPRESS",
-          status: "ACTIVE",
-          ownerId: adminUser.id,
-          encryptedCredentials: encryptJsonCredentials({
-            username: "seo_publisher",
-            appPassword: "xxxx-xxxx-xxxx-xxxx"
-          }),
-          publishingConfig: {
-            defaultStatus: "draft",
-            autoPublishApproved: false,
-            requireFeaturedImage: true
-          },
-          seoConfig: {
-            defaultAuthor: "Editorial Team",
-            requireSearchIntentAlignment: true,
-            requireSourceCitations: true,
-            enforceHelpfulContentGate: true
-          }
+    const websites = await websiteRepo.listWebsites();
+    let primaryWebsite: WebsiteEntity | null = websites[0] || null;
+
+    if (!primaryWebsite) {
+      primaryWebsite = await websiteRepo.createWebsite({
+        name: "Apex Tech Journal",
+        url: "https://apextech.example.com",
+        cmsType: "WORDPRESS",
+        status: "ACTIVE",
+        ownerId: adminUser ? adminUser.id : "user_admin",
+        encryptedCredentials: encryptJsonCredentials({
+          username: "seo_publisher",
+          appPassword: "xxxx-xxxx-xxxx-xxxx"
+        }),
+        publishingConfig: {
+          defaultStatus: "draft",
+          autoPublishApproved: false,
+          requireFeaturedImage: true
+        },
+        seoConfig: {
+          defaultAuthor: "Editorial Team",
+          requireSearchIntentAlignment: true,
+          requireSourceCitations: true,
+          enforceHelpfulContentGate: true
         }
       });
 
-      await db.websiteIntegration.createMany({
-        data: [
-          {
-            websiteId: primaryWebsite.id,
-            integrationType: "WORDPRESS",
-            name: "WordPress REST API v2",
-            endpointUrl: "https://apextech.example.com/wp-json/wp/v2",
-            encryptedCredentials: encryptJsonCredentials({
-              username: "seo_publisher",
-              appPassword: "xxxx-xxxx-xxxx-xxxx"
-            }),
-            status: "CONFIGURED"
-          },
-          {
-            websiteId: primaryWebsite.id,
-            integrationType: "GSC",
-            name: "Google Search Console Property",
-            endpointUrl: "sc-domain:apextech.example.com",
-            encryptedCredentials: encryptJsonCredentials({
-              clientEmail: "gsc-sync@apextech-seo.iam.gserviceaccount.com"
-            }),
-            status: "CONFIGURED"
-          },
-          {
-            websiteId: primaryWebsite.id,
-            integrationType: "N8N",
-            name: "n8n Community Webhook Bridge",
-            endpointUrl: "http://localhost:5678/webhook/seo-pipeline",
-            encryptedCredentials: encryptSecret("n8n-local-webhook-secret"),
-            status: "CONFIGURED"
-          }
-        ]
+      await websiteRepo.upsertIntegration({
+        websiteId: primaryWebsite.id,
+        integrationType: "WORDPRESS",
+        name: "WordPress REST API v2",
+        endpointUrl: "https://apextech.example.com/wp-json/wp/v2",
+        encryptedCredentials: encryptJsonCredentials({
+          username: "seo_publisher",
+          appPassword: "xxxx-xxxx-xxxx-xxxx"
+        }),
+        status: "CONFIGURED"
+      });
+
+      await websiteRepo.upsertIntegration({
+        websiteId: primaryWebsite.id,
+        integrationType: "GSC",
+        name: "Google Search Console Property",
+        endpointUrl: "sc-domain:apextech.example.com",
+        encryptedCredentials: encryptJsonCredentials({
+          clientEmail: "gsc-sync@apextech-seo.iam.gserviceaccount.com"
+        }),
+        status: "CONFIGURED"
+      });
+
+      await websiteRepo.upsertIntegration({
+        websiteId: primaryWebsite.id,
+        integrationType: "N8N",
+        name: "n8n Community Webhook Bridge",
+        endpointUrl: "http://localhost:5678/webhook/seo-pipeline",
+        encryptedCredentials: encryptSecret("n8n-local-webhook-secret"),
+        status: "CONFIGURED"
       });
 
       const keywordRepo = getKeywordDomainRepository();
@@ -283,7 +250,7 @@ export async function ensureSystemSeeded(): Promise<void> {
           websiteId: primaryWebsite.id,
           categoryId: catArchitecture.id,
           briefId: brief.id,
-          authorId: adminUser.id,
+          authorId: adminUser ? adminUser.id : "user_admin",
           title: "How to Build a Self-Hosted AI SEO Pipeline with Ollama & n8n",
           slug: "self-hosted-ai-seo-pipeline-ollama-n8n",
           excerpt: "Architectural blueprint for running a zero-cost SEO content engine using PostgreSQL, Ollama, and n8n.",
@@ -300,7 +267,7 @@ export async function ensureSystemSeeded(): Promise<void> {
             metaTitle: "Self-Hosted AI SEO Pipeline with Ollama & n8n (Zero-Cost Guide)",
             metaDesc: "Learn how to architect a scalable zero-cost SEO automation system with local LLMs, n8n Community Edition, and WordPress REST API.",
             changeSummary: "Initial Phase 01 foundation draft",
-            createdBy: adminUser.email
+            createdBy: adminUser ? adminUser.email : adminEmail
           }
         });
       }
@@ -336,8 +303,8 @@ export async function ensureSystemSeeded(): Promise<void> {
       });
     }
 
-    // 6b. Ensure Public Showcase Published Articles exist in PostgreSQL for the Frontend Website
-    const primarySite = await db.website.findFirst({ orderBy: { createdAt: "asc" } });
+    // 6b. Ensure Public Showcase Published Articles exist in MongoDB for the Frontend Website
+    const primarySite = (await websiteRepo.listWebsites())[0] || null;
     if (primarySite) {
       const keywordRepo = getKeywordDomainRepository();
       const catTech = await keywordRepo.upsertCategory({
@@ -432,7 +399,7 @@ export async function ensureSystemSeeded(): Promise<void> {
         await articleRepo.upsertArticle({
           websiteId: primarySite.id,
           categoryId: item.categoryId,
-          authorId: adminUser.id,
+          authorId: adminUser ? adminUser.id : "user_admin",
           title: item.title,
           slug: item.slug,
           excerpt: item.excerpt,

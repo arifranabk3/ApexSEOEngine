@@ -5,8 +5,13 @@ import {
   UserEntity,
   RoleWithPermissions,
   CreateUserInput,
+  UpdateUserInput,
+  CreateRoleInput,
+  CreatePermissionInput,
+  PermissionEntity,
   UserEntitySchema,
-  RoleEntitySchema
+  RoleEntitySchema,
+  PermissionEntitySchema
 } from "./auth-repository.types";
 import crypto from "crypto";
 
@@ -225,6 +230,104 @@ export class MongoAuthRepository implements IAuthRepository {
       role: parsed.data,
       permissions: parsed.data.permissionCodes
     };
+  }
+
+  async countUsers(): Promise<number> {
+    const db = await getMongoDb();
+    return db.collection("users").countDocuments();
+  }
+
+  async updateUser(id: string, updates: UpdateUserInput): Promise<UserEntity | null> {
+    const db = await getMongoDb();
+    const now = new Date();
+    const setFields: Record<string, unknown> = { updatedAt: now };
+
+    if (updates.name !== undefined) setFields.name = updates.name;
+    if (updates.isActive !== undefined) setFields.isActive = updates.isActive;
+    if (updates.mustChangePassword !== undefined) setFields.mustChangePassword = updates.mustChangePassword;
+    if (updates.roleId !== undefined) setFields.roleId = updates.roleId;
+    if (updates.websiteIds !== undefined) setFields.websiteIds = updates.websiteIds;
+
+    await db.collection("users").updateOne({ id }, { $set: setFields });
+    const userRec = await this.findUserById(id);
+    return userRec ? userRec.user : null;
+  }
+
+  async upsertPermission(input: CreatePermissionInput): Promise<PermissionEntity> {
+    const db = await getMongoDb();
+    const now = new Date();
+    const existing = await db.collection("permissions").findOne({ code: input.code });
+
+    if (existing) {
+      const updated = {
+        module: input.module,
+        action: input.action,
+        description: input.description ?? existing.description ?? null,
+        updatedAt: now
+      };
+      await db.collection("permissions").updateOne({ code: input.code }, { $set: updated });
+      return PermissionEntitySchema.parse({
+        id: existing.id,
+        code: input.code,
+        module: input.module,
+        action: input.action,
+        description: updated.description,
+        createdAt: new Date(existing.createdAt),
+        updatedAt: now
+      });
+    }
+
+    const id = crypto.randomUUID();
+    const doc = {
+      id,
+      code: input.code,
+      module: input.module,
+      action: input.action,
+      description: input.description ?? null,
+      createdAt: now,
+      updatedAt: now
+    };
+    await db.collection("permissions").insertOne(doc);
+    return PermissionEntitySchema.parse(doc);
+  }
+
+  async upsertRole(input: CreateRoleInput): Promise<RoleWithPermissions> {
+    const db = await getMongoDb();
+    const now = new Date();
+    const existing = await db.collection("roles").findOne({ name: input.name });
+
+    if (existing) {
+      await db.collection("roles").updateOne(
+        { name: input.name },
+        {
+          $set: {
+            description: input.description ?? existing.description ?? null,
+            permissionCodes: input.permissionCodes,
+            isSystem: input.isSystem ?? existing.isSystem ?? false,
+            updatedAt: now
+          }
+        }
+      );
+      const res = await this.getRoleByName(input.name);
+      if (!res) throw new Error(`Failed to load updated role ${input.name}`);
+      return res;
+    }
+
+    const id = crypto.randomUUID();
+    const doc = {
+      id,
+      name: input.name,
+      description: input.description ?? null,
+      isSystem: input.isSystem ?? false,
+      permissionCodes: input.permissionCodes,
+      version: 1,
+      createdAt: now,
+      updatedAt: now
+    };
+    await db.collection("roles").insertOne(doc);
+    const res = await this.getRoleByName(input.name);
+    if (!res) throw new Error(`Failed to create role ${input.name}`);
+    return res;
   }
 
   async verifyTenantAccess(userId: string, websiteId: string): Promise<boolean> {

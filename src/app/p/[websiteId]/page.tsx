@@ -1,8 +1,11 @@
 import React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
+import { getAuthRepository } from "@/repositories/auth-repository.factory";
 import PublicThemeToggle from "@/components/public/PublicThemeToggle";
 import { ArticleCoverArt } from "@/components/public/ArticleCoverArt";
 import {
@@ -37,28 +40,55 @@ export default async function PublicPublicationHomePage({
   const activeCategorySlug = resolvedSearch.category || "";
   const searchQuery = (resolvedSearch.q || "").trim().toLowerCase();
 
-  const db = await getDb();
+  const websiteRepo = getWebsiteRepository();
+  const rawWebsite = await websiteRepo.findWebsiteById(websiteId);
 
-  const website = await db.website.findUnique({
-    where: { id: websiteId },
-    include: {
-      categories: {
-        orderBy: { name: "asc" }
-      },
-      articles: {
-        where: { status: "PUBLISHED" },
-        include: {
-          category: true,
-          author: true
-        },
-        orderBy: { publishedAt: "desc" }
-      }
-    }
-  });
-
-  if (!website) {
+  if (!rawWebsite) {
     notFound();
   }
+
+  const keywordRepo = getKeywordDomainRepository();
+  const articleRepo = getArticleRepository();
+  const authRepo = getAuthRepository();
+
+  const [categories, rawArticles] = await Promise.all([
+    keywordRepo.findCategoriesByWebsite(rawWebsite.id),
+    articleRepo.findArticlesByWebsite(rawWebsite.id, {
+      status: "PUBLISHED",
+      orderBy: "publishedAt",
+      orderDir: "desc"
+    })
+  ]);
+
+  const authorIds = Array.from(new Set(rawArticles.map((a) => a.authorId).filter(Boolean))) as string[];
+  const authorRecords = await Promise.all(authorIds.map((id) => authRepo.findUserById(id)));
+  const authorMap = new Map<string, { id: string; name: string; email: string }>();
+  for (const rec of authorRecords) {
+    if (rec?.user) {
+      authorMap.set(rec.user.id, {
+        id: rec.user.id,
+        name: rec.user.name,
+        email: rec.user.email
+      });
+    }
+  }
+
+  const categoryMap = new Map<string, { id: string; name: string; slug: string }>();
+  for (const c of categories) {
+    categoryMap.set(c.id, { id: c.id, name: c.name, slug: c.slug });
+  }
+
+  const articles = rawArticles.map((art) => ({
+    ...art,
+    category: art.categoryId ? categoryMap.get(art.categoryId) || null : null,
+    author: art.authorId ? authorMap.get(art.authorId) || null : null
+  }));
+
+  const website = {
+    ...rawWebsite,
+    categories,
+    articles
+  };
 
   const filteredArticles = website.articles.filter((art) => {
     const matchesCat =

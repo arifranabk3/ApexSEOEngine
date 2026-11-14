@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -82,13 +82,11 @@ export async function POST(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
+  const websiteRepo = getWebsiteRepository();
 
   // Multi-tenant check: Verify website ownership or admin role
   const targetWebsiteId = "websiteId" in data ? data.websiteId : data.input.websiteId;
-  const website = await db.website.findUnique({
-    where: { id: targetWebsiteId }
-  });
+  const website = await websiteRepo.findWebsiteById(targetWebsiteId);
 
   if (!website) {
     return apiError("WEBSITE_NOT_FOUND", "Selected website does not exist", 404);
