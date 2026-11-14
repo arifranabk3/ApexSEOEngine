@@ -42,6 +42,7 @@ import ComplianceCenterPanel from "./ComplianceCenterPanel";
 import { TopicOutlineWorkflow } from "./TopicOutlineWorkflow";
 import { ArticleImageGenerator } from "./ArticleImageGenerator";
 import { FactualReviewPanel } from "./FactualReviewPanel";
+import { PakistanGoldRateWidget } from "./PakistanGoldRateWidget";
 
 export type NavSectionId =
   | "overview"
@@ -1029,6 +1030,9 @@ export default function DashboardShell({
                   );
                 })}
               </div>
+
+              {/* Financial Market Integration: Pakistan Gold Rate Widget */}
+              <PakistanGoldRateWidget />
 
               {/* Realistic Empty State / Live GSC Overview (No Fake Metrics) */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
