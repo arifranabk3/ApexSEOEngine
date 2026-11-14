@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { NextRequest } from "next/server";
-import { getDb } from "./db";
+import { getAuthRepository } from "@/repositories/auth-repository.factory";
 
 export const SESSION_COOKIE_NAME = "apexseo_session";
 export const CSRF_COOKIE_NAME = "apexseo_csrf";
@@ -70,22 +70,22 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
     // Database-backed session validation & revocation check
     // If user exists in DB, ensure user is active and tokenVersion matches
     try {
-      const db = await getDb();
-      const dbUser = await db.user.findUnique({
-        where: { id: sessionUser.id },
-        select: { isActive: true, tokenVersion: true, mustChangePassword: true }
-      });
+      const repo = getAuthRepository();
+      const record = await repo.findUserById(sessionUser.id);
 
-      if (dbUser) {
-        if (!dbUser.isActive) {
+      if (record) {
+        if (!record.user.isActive) {
           return null;
         }
 
-        if (dbUser.tokenVersion !== (sessionUser.tokenVersion ?? 0)) {
+        if (record.user.tokenVersion !== (sessionUser.tokenVersion ?? 0)) {
           return null; // Token revoked due to password change or explicit revocation
         }
 
-        sessionUser.mustChangePassword = dbUser.mustChangePassword;
+        sessionUser.mustChangePassword = record.user.mustChangePassword;
+        // Centralized RBAC check: sync active permissions from live role
+        sessionUser.roleName = record.role.name;
+        sessionUser.permissions = record.permissions;
       }
     } catch {
       // In standalone unit tests or disconnected DB mock environments, permit payload evaluation
@@ -132,42 +132,29 @@ export async function authenticateUserCredentials(
   email: string,
   passwordPlain: string
 ): Promise<SessionUser | null> {
-  const db = await getDb();
+  const repo = getAuthRepository();
   const normalizedEmail = email.trim().toLowerCase();
 
-  const user = await db.user.findUnique({
-    where: { email: normalizedEmail },
-    include: {
-      role: {
-        include: {
-          permissions: true
-        }
-      }
-    }
-  });
-
-  if (!user || !user.isActive) {
+  const record = await repo.findUserByEmail(normalizedEmail);
+  if (!record || !record.user.isActive) {
     return null;
   }
 
-  const valid = await verifyPassword(passwordPlain, user.passwordHash);
+  const valid = await verifyPassword(passwordPlain, record.user.passwordHash);
   if (!valid) {
     return null;
   }
 
-  await db.user.update({
-    where: { id: user.id },
-    data: { lastLoginAt: new Date() }
-  });
+  await repo.updateLastLogin(record.user.id, new Date());
 
   return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    roleName: user.role.name,
-    permissions: user.role.permissions.map((p) => p.code),
-    tokenVersion: user.tokenVersion ?? 0,
-    mustChangePassword: user.mustChangePassword ?? false
+    id: record.user.id,
+    email: record.user.email,
+    name: record.user.name,
+    roleName: record.role.name,
+    permissions: record.permissions,
+    tokenVersion: record.user.tokenVersion ?? 0,
+    mustChangePassword: record.user.mustChangePassword ?? false
   };
 }
 
