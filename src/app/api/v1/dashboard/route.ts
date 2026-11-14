@@ -5,6 +5,7 @@ import { apiSuccess, requireApiAuth } from "@/lib/api-response";
 import { DashboardSummaryMetrics } from "@/types/domain";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
 
 export async function GET(req: NextRequest) {
   await ensureSystemSeeded();
@@ -17,12 +18,11 @@ export async function GET(req: NextRequest) {
   const keywordRepo = getKeywordDomainRepository();
   const totalKeywords = await keywordRepo.countKeywords();
   const totalKeywordClusters = await keywordRepo.countClusters();
-  const totalArticles = await db.article.count();
-  const publishedArticles = await db.article.count({ where: { status: "PUBLISHED" } });
-  const draftArticles = await db.article.count({ where: { status: "DRAFT" } });
-  const pendingApprovals = await db.article.count({
-    where: { status: "PENDING_APPROVAL" }
-  });
+  const articleRepo = getArticleRepository();
+  const totalArticles = await articleRepo.countArticles();
+  const publishedArticles = await articleRepo.countArticles({ status: "PUBLISHED" });
+  const draftArticles = await articleRepo.countArticles({ status: "DRAFT" });
+  const pendingApprovals = await articleRepo.countArticles({ status: "PENDING_APPROVAL" });
   const activeAutomations = await db.automationWorkflow.count({
     where: { isEnabled: true }
   });

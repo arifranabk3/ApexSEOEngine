@@ -1,10 +1,13 @@
 import React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import PublicThemeToggle from "@/components/public/PublicThemeToggle";
 import { ArticleCoverArt } from "@/components/public/ArticleCoverArt";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
+import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
+import { getAuthRepository } from "@/repositories/auth-repository.factory";
 import {
   ArrowLeft,
   ShieldCheck,
@@ -28,35 +31,51 @@ export default async function PublicPublishedArticlePage({
 }) {
   await ensureSystemSeeded();
   const { websiteId, slug } = await params;
-  const db = await getDb();
 
-  const article = await db.article.findFirst({
-    where: {
-      websiteId,
-      slug,
-      status: "PUBLISHED"
-    },
-    include: {
-      website: true,
-      author: true,
-      category: true
-    }
-  });
+  const articleRepo = getArticleRepository();
+  const websiteRepo = getWebsiteRepository();
+  const keywordRepo = getKeywordDomainRepository();
+  const authRepo = getAuthRepository();
 
-  if (!article) {
+  const articleEntity = await articleRepo.findArticleBySlug(websiteId, slug);
+
+  if (!articleEntity || articleEntity.status !== "PUBLISHED") {
     notFound();
   }
 
-  const relatedArticles = await db.article.findMany({
-    where: {
-      websiteId,
-      status: "PUBLISHED",
-      id: { not: article.id }
-    },
-    include: { category: true },
-    orderBy: { publishedAt: "desc" },
-    take: 2
+  const [website, authorRecord, category] = await Promise.all([
+    websiteRepo.findWebsiteById(articleEntity.websiteId),
+    articleEntity.authorId ? authRepo.findUserById(articleEntity.authorId) : null,
+    articleEntity.categoryId ? keywordRepo.findCategoryById(articleEntity.categoryId) : null
+  ]);
+
+  if (!website) {
+    notFound();
+  }
+
+  const article = {
+    ...articleEntity,
+    website,
+    author: authorRecord?.user || null,
+    category
+  };
+
+  const allArticles = await articleRepo.findArticlesByWebsite(websiteId, {
+    status: "PUBLISHED",
+    orderBy: "publishedAt",
+    orderDir: "desc"
   });
+
+  const relatedArticlesRaw = allArticles.filter((a) => a.id !== article.id).slice(0, 2);
+  const relatedArticles = await Promise.all(
+    relatedArticlesRaw.map(async (rel) => {
+      const relCategory = rel.categoryId ? await keywordRepo.findCategoryById(rel.categoryId) : null;
+      return {
+        ...rel,
+        category: relCategory
+      };
+    })
+  );
 
   const readingMinutes = Math.max(3, Math.ceil(article.wordCount / 220));
   const canonicalHref =

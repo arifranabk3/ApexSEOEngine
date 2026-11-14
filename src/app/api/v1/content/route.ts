@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -11,6 +10,8 @@ import {
 import { recordAuditLog } from "@/lib/audit";
 import { evaluateGoogleSearchComplianceGate } from "@/services/compliance/seo-quality-gate";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 
 const createArticleSchema = z.object({
   websiteId: z.string().min(1),
@@ -46,26 +47,35 @@ export async function GET(req: NextRequest) {
 
   const websiteId = req.nextUrl.searchParams.get("websiteId") || undefined;
 
-  const db = await getDb();
-  const articles = await db.article.findMany({
-    where: websiteId ? { websiteId } : undefined,
-    orderBy: { updatedAt: "desc" },
-    include: {
-      website: { select: { id: true, name: true, url: true } },
-      category: { select: { id: true, name: true, slug: true } },
-      versions: {
-        orderBy: { versionNumber: "desc" },
-        take: 5
-      }
-    }
-  });
-
+  const articleRepo = getArticleRepository();
   const keywordRepo = getKeywordDomainRepository();
+  const websiteRepo = getWebsiteRepository();
+
+  const articlesList = websiteId
+    ? await articleRepo.findArticlesByWebsite(websiteId)
+    : [];
+
+  const enrichedArticles = await Promise.all(
+    articlesList.map(async (art) => {
+      const [website, category, versions] = await Promise.all([
+        websiteRepo.findWebsiteById(art.websiteId),
+        art.categoryId ? keywordRepo.findCategoryById(art.categoryId) : null,
+        articleRepo.getVersionsByArticle(art.id)
+      ]);
+      return {
+        ...art,
+        website: website ? { id: website.id, name: website.name, url: website.url } : null,
+        category: category ? { id: category.id, name: category.name, slug: category.slug } : null,
+        versions: versions.slice(0, 5)
+      };
+    })
+  );
+
   const categories = websiteId
     ? await keywordRepo.findCategoriesByWebsite(websiteId)
     : [];
 
-  return apiSuccess({ articles, categories });
+  return apiSuccess({ articles: enrichedArticles, categories });
 }
 
 export async function POST(req: NextRequest) {
@@ -79,12 +89,12 @@ export async function POST(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
   const wordCount = data.content.trim().split(/\s+/).filter(Boolean).length;
 
   // Enforce Google Search Compliance Quality Gate if attempting direct PUBLISHED status
   if (data.status === "PUBLISHED") {
-    const site = await db.website.findUnique({ where: { id: data.websiteId } });
+    const websiteRepo = getWebsiteRepository();
+    const site = await websiteRepo.findWebsiteById(data.websiteId);
     const pageUrl = `${(site?.url || "https://example.com").replace(/\/$/, "")}/${data.slug}`;
     const gate = evaluateGoogleSearchComplianceGate({
       technical: {
@@ -122,35 +132,36 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const created = await db.article.create({
-    data: {
-      websiteId: data.websiteId,
-      categoryId: data.categoryId || null,
-      authorId: user.id,
+  const articleRepo = getArticleRepository();
+  const created = await articleRepo.createArticle({
+    websiteId: data.websiteId,
+    categoryId: data.categoryId || null,
+    authorId: user.id,
+    title: data.title,
+    slug: data.slug,
+    excerpt: data.excerpt || null,
+    content: data.content,
+    status: data.status,
+    focusKeyword: data.focusKeyword || null,
+    metaTitle: data.metaTitle || data.title,
+    metaDescription: data.metaDescription || data.excerpt || null,
+    wordCount,
+    seoScore: data.focusKeyword ? 82 : 65,
+    initialVersion: {
       title: data.title,
-      slug: data.slug,
-      excerpt: data.excerpt || null,
       content: data.content,
-      status: data.status,
-      focusKeyword: data.focusKeyword || null,
       metaTitle: data.metaTitle || data.title,
-      metaDescription: data.metaDescription || data.excerpt || null,
-      wordCount,
-      seoScore: data.focusKeyword ? 82 : 65,
-      versions: {
-        create: {
-          versionNumber: 1,
-          title: data.title,
-          content: data.content,
-          metaTitle: data.metaTitle || data.title,
-          metaDesc: data.metaDescription || null,
-          changeSummary: "Initial article version created",
-          createdBy: user.email
-        }
-      }
-    },
-    include: { versions: true }
+      metaDesc: data.metaDescription || null,
+      changeSummary: "Initial article version created",
+      createdBy: user.email
+    }
   });
+
+  const versions = await articleRepo.getVersionsByArticle(created.id);
+  const createdWithVersions = {
+    ...created,
+    versions
+  };
 
   await recordAuditLog({
     userId: user.id,
@@ -161,7 +172,7 @@ export async function POST(req: NextRequest) {
     metadata: { title: created.title, websiteId: created.websiteId }
   });
 
-  return apiSuccess(created, 201);
+  return apiSuccess(createdWithVersions, 201);
 }
 
 export async function PATCH(req: NextRequest) {
@@ -175,54 +186,40 @@ export async function PATCH(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
-  const existing = await db.article.findUnique({
-    where: { id: data.articleId },
-    include: {
-      versions: {
-        orderBy: { versionNumber: "desc" },
-        take: 1
-      }
-    }
-  });
+  const articleRepo = getArticleRepository();
+  const existing = await articleRepo.findArticleById(data.articleId);
 
   if (!existing) {
     return apiError("ARTICLE_NOT_FOUND", "Article not found", 404);
   }
 
-  const nextVersionNumber = (existing.versions[0]?.versionNumber || 0) + 1;
   const nextTitle = data.title ?? existing.title;
   const nextContent = data.content ?? existing.content;
   const wordCount = nextContent.trim().split(/\s+/).filter(Boolean).length;
 
-  const updated = await db.article.update({
-    where: { id: existing.id },
-    data: {
+  const updated = await articleRepo.updateArticle(existing.id, {
+    title: nextTitle,
+    content: nextContent,
+    status: data.status ?? existing.status,
+    metaTitle: data.metaTitle ?? existing.metaTitle,
+    metaDescription: data.metaDescription ?? existing.metaDescription,
+    wordCount,
+    newVersion: {
       title: nextTitle,
       content: nextContent,
-      status: data.status ?? existing.status,
       metaTitle: data.metaTitle ?? existing.metaTitle,
-      metaDescription: data.metaDescription ?? existing.metaDescription,
-      wordCount,
-      versions: {
-        create: {
-          versionNumber: nextVersionNumber,
-          title: nextTitle,
-          content: nextContent,
-          metaTitle: data.metaTitle ?? existing.metaTitle,
-          metaDesc: data.metaDescription ?? existing.metaDescription,
-          changeSummary: data.changeSummary || `Revision v${nextVersionNumber}`,
-          createdBy: user.email
-        }
-      }
-    },
-    include: {
-      versions: {
-        orderBy: { versionNumber: "desc" }
-      }
+      metaDesc: data.metaDescription ?? existing.metaDescription,
+      changeSummary: data.changeSummary || undefined,
+      createdBy: user.email
     }
   });
 
-  return apiSuccess(updated);
+  const versions = await articleRepo.getVersionsByArticle(existing.id);
+  const updatedWithVersions = {
+    ...updated,
+    versions
+  };
+
+  return apiSuccess(updatedWithVersions);
 }
 

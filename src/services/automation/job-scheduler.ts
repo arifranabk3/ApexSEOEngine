@@ -23,6 +23,7 @@ import {
   processDurableJobBatch,
   recoverStalledJobs
 } from "./durable-job-queue";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
 
 export interface DefaultScheduleSpec {
   jobType: DurableJobType;
@@ -150,11 +151,13 @@ export async function runSchedulerTick(params: {
 
       if (schedule.jobType === "AUTOMATED_PUBLISHING") {
         // Only APPROVED articles are eligible; the publishing gate still re-validates each one.
-        const approved = await db.article.findMany({
-          where: { websiteId: schedule.websiteId || undefined, status: "APPROVED" },
-          select: { id: true },
-          take: 10
-        });
+        const articleRepo = getArticleRepository();
+        const approved = schedule.websiteId
+          ? await articleRepo.findArticlesByWebsite(schedule.websiteId, {
+              status: "APPROVED",
+              limit: 10
+            })
+          : [];
         for (const art of approved) {
           produced.push(
             await enqueueDurableJob({

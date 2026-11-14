@@ -14,6 +14,8 @@ import {
   ReviewerDecision
 } from "@/services/seo/factual-claim-schemas";
 import { reviewArticleFactualClaims } from "@/services/seo/factual-claim-reviewer";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 
 const factualReviewApiSchema = z.discriminatedUnion("action", [
   z.object({
@@ -53,20 +55,22 @@ export async function POST(req: NextRequest) {
 
   try {
     if (data.action === "audit_article") {
-      const article = await db.article.findUnique({
-        where: { id: data.articleId },
-        include: {
-          website: true,
-          brief: true
-        }
-      });
+      const articleRepo = getArticleRepository();
+      const websiteRepo = getWebsiteRepository();
+
+      const article = await articleRepo.findArticleById(data.articleId);
 
       if (!article) {
         return apiError("NOT_FOUND", "Article not found", 404);
       }
 
+      const website = await websiteRepo.findWebsiteById(article.websiteId);
+      if (!website) {
+        return apiError("NOT_FOUND", "Website not found", 404);
+      }
+
       // Enforce tenant isolation
-      if (user.roleName !== "ADMIN" && article.website.ownerId !== user.id) {
+      if (user.roleName !== "ADMIN" && website.ownerId !== user.id) {
         return apiError("FORBIDDEN", "You do not have access to this website's articles", 403);
       }
 
@@ -167,16 +171,21 @@ export async function POST(req: NextRequest) {
     }
 
     if (data.action === "record_reviewer_decision") {
-      const article = await db.article.findUnique({
-        where: { id: data.articleId },
-        include: { website: true }
-      });
+      const articleRepo = getArticleRepository();
+      const websiteRepo = getWebsiteRepository();
+
+      const article = await articleRepo.findArticleById(data.articleId);
 
       if (!article) {
         return apiError("NOT_FOUND", "Article not found", 404);
       }
 
-      if (user.roleName !== "ADMIN" && article.website.ownerId !== user.id) {
+      const website = await websiteRepo.findWebsiteById(article.websiteId);
+      if (!website) {
+        return apiError("NOT_FOUND", "Website not found", 404);
+      }
+
+      if (user.roleName !== "ADMIN" && website.ownerId !== user.id) {
         return apiError("FORBIDDEN", "You do not have access to this website's articles", 403);
       }
 

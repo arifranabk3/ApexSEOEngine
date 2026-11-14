@@ -23,6 +23,8 @@ import {
   evaluateTrafficQualityProtection,
   GOOGLE_POLICY_REGISTRY
 } from "@/services/compliance/traffic-and-policy-monitor";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 
 const complianceAuditRequestSchema = z.object({
   websiteId: z.string().optional(),
@@ -326,13 +328,11 @@ export async function PUT(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
-  const article = await db.article.findFirst({
-    where: { id: data.articleId, websiteId: data.websiteId },
-    include: { website: true }
-  });
+  const articleRepo = getArticleRepository();
+  const websiteRepo = getWebsiteRepository();
 
-  if (!article) {
+  const article = await articleRepo.findArticleById(data.articleId);
+  if (!article || article.websiteId !== data.websiteId) {
     return apiError(
       "ARTICLE_NOT_FOUND_FOR_WEBSITE",
       "Article not found or belongs to a different isolated website",
@@ -340,7 +340,16 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  const pageUrl = `${article.website.url.replace(/\/$/, "")}/${article.slug}`;
+  const website = await websiteRepo.findWebsiteById(article.websiteId);
+  if (!website) {
+    return apiError(
+      "WEBSITE_NOT_FOUND",
+      "Associated website not found",
+      404
+    );
+  }
+
+  const pageUrl = `${website.url.replace(/\/$/, "")}/${article.slug}`;
   const decision = evaluateContentPublishingTransition({
     articleId: article.id,
     websiteId: article.websiteId,
@@ -390,21 +399,18 @@ export async function PUT(req: NextRequest) {
         htmlContent: article.content
       },
       advertisingAndTechnical: {
-        siteUrl: article.website.url,
+        siteUrl: website.url,
         allowsMediapartnersGoogleCrawler: true,
         hasCmpConsentBannerConfigured: true
       }
     }
   });
 
-  await db.article.update({
-    where: { id: article.id },
-    data: {
-      status: decision.resultingState,
-      ...(decision.resultingState === "PUBLISHED"
-        ? { publishedAt: new Date(), publishedUrl: pageUrl }
-        : {})
-    }
+  await articleRepo.updateArticle(article.id, {
+    status: decision.resultingState,
+    ...(decision.resultingState === "PUBLISHED"
+      ? { publishedAt: new Date(), publishedUrl: pageUrl }
+      : {})
   });
 
   await recordAuditLog({

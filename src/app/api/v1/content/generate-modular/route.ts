@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -12,6 +11,9 @@ import { decryptSecret } from "@/lib/crypto";
 import { recordAuditLog } from "@/lib/audit";
 import { createAIAdapter } from "@/services/ai/provider-adapter";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
+import { getContentBriefRepository } from "@/repositories/content-brief-repository.factory";
 import {
   OutlineSectionSchema,
   ArticleOutlineOutput
@@ -55,28 +57,30 @@ export async function POST(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
+  const articleRepo = getArticleRepository();
+  const websiteRepo = getWebsiteRepository();
+  const briefRepo = getContentBriefRepository();
 
   // Find the target article
-  const article = await db.article.findUnique({
-    where: { id: data.articleId },
-    include: {
-      brief: true,
-      website: true,
-      versions: {
-        orderBy: { versionNumber: "desc" },
-        take: 1
-      }
-    }
-  });
+  const article = await articleRepo.findArticleById(data.articleId);
 
   if (!article) {
     return apiError("ARTICLE_NOT_FOUND", "Article does not exist", 404);
   }
 
+  const [website, brief, latestVersion] = await Promise.all([
+    websiteRepo.findWebsiteById(article.websiteId),
+    article.briefId ? briefRepo.findById(article.briefId) : null,
+    articleRepo.getLatestVersion(article.id)
+  ]);
+
+  if (!website) {
+    return apiError("WEBSITE_NOT_FOUND", "Website does not exist", 404);
+  }
+
   // Tenant Isolation Enforcement
   const isSuperAdmin = user.roleName === "SUPER_ADMIN" || user.roleName === "ADMIN";
-  if (!isSuperAdmin && article.website.ownerId !== user.id) {
+  if (!isSuperAdmin && website.ownerId !== user.id) {
     return apiError(
       "FORBIDDEN_WEBSITE_ACCESS",
       "You do not have access to edit articles for this website",
@@ -86,7 +90,7 @@ export async function POST(req: NextRequest) {
 
   // Handle Action 3: assemble_and_save (No AI call required)
   if (data.action === "assemble_and_save") {
-    const rawOutline = (article.brief?.outline || {}) as unknown as ArticleOutlineOutput;
+    const rawOutline = (brief?.outline || {}) as unknown as ArticleOutlineOutput;
     if (!rawOutline || !rawOutline.h1) {
       return apiError("MISSING_OUTLINE", "ContentBrief does not contain an approved outline", 400);
     }
@@ -99,48 +103,42 @@ export async function POST(req: NextRequest) {
     const assembled = generator.assembleArticle(
       rawOutline,
       data.sections,
-      article.website.url
+      website.url
     );
 
-    const nextVersionNumber = (article.versions[0]?.versionNumber || 0) + 1;
+    const nextVersionNumber = (latestVersion?.versionNumber || 0) + 1;
 
     // Update article and preserve full version history
-    const updated = await db.article.update({
-      where: { id: article.id },
-      data: {
+    const updated = await articleRepo.updateArticle(article.id, {
+      title: assembled.title,
+      content: assembled.markdownContent,
+      wordCount: assembled.wordCount,
+      seoScore: assembled.complianceSummary.canPublishDirectly ? 92 : 75,
+      status: "DRAFT", // Keep as draft for human editorial review
+      newVersion: {
         title: assembled.title,
         content: assembled.markdownContent,
-        wordCount: assembled.wordCount,
-        seoScore: assembled.complianceSummary.canPublishDirectly ? 92 : 75,
-        status: "DRAFT", // Keep as draft for human editorial review
-        versions: {
-          create: {
-            versionNumber: nextVersionNumber,
-            title: assembled.title,
-            content: assembled.markdownContent,
-            metaTitle: assembled.metaTitle,
-            metaDesc: assembled.metaDescription,
-            changeSummary:
-              data.changeSummary ||
-              `Modular assembly v${nextVersionNumber} (${assembled.sections.length} sections, ${assembled.allUnverifiedClaims.length} unverified claims)`,
-            createdBy: user.email
-          }
-        }
-      },
-      include: {
-        versions: {
-          orderBy: { versionNumber: "desc" },
-          take: 1
-        }
+        metaTitle: assembled.metaTitle,
+        metaDesc: assembled.metaDescription,
+        changeSummary:
+          data.changeSummary ||
+          `Modular assembly v${nextVersionNumber} (${assembled.sections.length} sections, ${assembled.allUnverifiedClaims.length} unverified claims)`,
+        createdBy: user.email
       }
     });
+
+    const versions = await articleRepo.getVersionsByArticle(article.id);
+    const updatedWithVersions = {
+      ...updated,
+      versions
+    };
 
     await recordAuditLog({
       userId: user.id,
       action: "ARTICLE_MODULAR_ASSEMBLED",
       module: "content",
       entityType: "Article",
-      entityId: updated.id,
+      entityId: updated!.id,
       metadata: {
         version: nextVersionNumber,
         sectionsCount: assembled.sections.length,
@@ -149,7 +147,7 @@ export async function POST(req: NextRequest) {
     });
 
     return apiSuccess({
-      article: updated,
+      article: updatedWithVersions,
       assembled
     });
   }

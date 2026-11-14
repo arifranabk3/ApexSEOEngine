@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -12,6 +11,8 @@ import { recordAuditLog } from "@/lib/audit";
 import { DeterministicSvgEngine } from "@/services/media/svg-engine";
 import { SvgTemplateTypeEnum } from "@/services/media/svg-templates.types";
 import { sanitizeSvg } from "@/services/media/svg-sanitizer";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 
 const generateImageSchema = z.discriminatedUnion("action", [
   z.object({
@@ -73,19 +74,23 @@ export async function POST(req: NextRequest) {
   }
 
   // Action 2: Attach to existing Article (Persisting ArticleImage record)
-  const db = await getDb();
-  const article = await db.article.findUnique({
-    where: { id: data.articleId },
-    include: { website: true }
-  });
+  const articleRepo = getArticleRepository();
+  const websiteRepo = getWebsiteRepository();
+
+  const article = await articleRepo.findArticleById(data.articleId);
 
   if (!article) {
     return apiError("ARTICLE_NOT_FOUND", "Article does not exist", 404);
   }
 
+  const website = await websiteRepo.findWebsiteById(article.websiteId);
+  if (!website) {
+    return apiError("WEBSITE_NOT_FOUND", "Website does not exist", 404);
+  }
+
   // Tenant Isolation Enforcement
   const isSuperAdmin = user.roleName === "SUPER_ADMIN" || user.roleName === "ADMIN";
-  if (!isSuperAdmin && article.website.ownerId !== user.id) {
+  if (!isSuperAdmin && website.ownerId !== user.id) {
     return apiError(
       "FORBIDDEN_WEBSITE_ACCESS",
       "You do not have access to manage images for this website",
@@ -107,29 +112,19 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // If this image is featured, un-feature existing images on this article
-  if (data.isFeatured) {
-    await db.articleImage.updateMany({
-      where: { articleId: article.id },
-      data: { isFeatured: false }
-    });
-  }
-
   // Encode SVG as Data URI for instant zero-cost persistence
   const encodedSvgDataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(sanitization.sanitizedSvg)}`;
 
-  const articleImage = await db.articleImage.create({
-    data: {
-      articleId: article.id,
-      url: encodedSvgDataUrl,
-      altText: data.customAltText || generated.altText,
-      caption: data.customCaption || generated.caption,
-      prompt: `Deterministic SVG Template: ${data.templateType}`,
-      provider: "LOCAL_DETERMINISTIC_SVG",
-      isFeatured: data.isFeatured,
-      width: generated.width,
-      height: generated.height
-    }
+  const articleImage = await articleRepo.addImage({
+    articleId: article.id,
+    url: encodedSvgDataUrl,
+    altText: data.customAltText || generated.altText,
+    caption: data.customCaption || generated.caption,
+    prompt: `Deterministic SVG Template: ${data.templateType}`,
+    provider: "LOCAL_DETERMINISTIC_SVG",
+    isFeatured: data.isFeatured,
+    width: generated.width,
+    height: generated.height
   });
 
   await recordAuditLog({

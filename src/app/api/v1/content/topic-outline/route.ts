@@ -14,6 +14,7 @@ import { createAIAdapter } from "@/services/ai/provider-adapter";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 import { getContentBriefRepository } from "@/repositories/content-brief-repository.factory";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
 import {
   TopicAnalysisOutputSchema,
   TopicClusterOutputSchema,
@@ -162,45 +163,34 @@ export async function POST(req: NextRequest) {
     // D. Optionally create draft Article with initial version
     let articleRecord = null;
     if (data.createArticleDraft) {
+      const articleRepo = getArticleRepository();
       // Deduplicate slug if an article with the same slug already exists for this website
       let targetSlug = data.outline.urlSlug;
-      const existingArticleWithSlug = await db.article.findUnique({
-        where: {
-          websiteId_slug: {
-            websiteId: website.id,
-            slug: targetSlug
-          }
-        }
-      });
+      const existingArticleWithSlug = await articleRepo.findArticleBySlug(website.id, targetSlug);
       if (existingArticleWithSlug) {
         targetSlug = `${targetSlug}-${Date.now().toString().slice(-4)}`;
       }
 
-      articleRecord = await db.article.create({
-        data: {
-          websiteId: website.id,
-          briefId: brief.id,
-          authorId: user.id,
+      articleRecord = await articleRepo.createArticle({
+        websiteId: website.id,
+        briefId: brief.id,
+        authorId: user.id,
+        title: data.outline.h1,
+        slug: targetSlug,
+        excerpt: data.outline.metaDescription,
+        content: `# ${data.outline.h1}\n\n*Outline approved. Ready for section generation.*`,
+        focusKeyword: data.keyword,
+        metaTitle: data.outline.seoTitle,
+        metaDescription: data.outline.metaDescription,
+        status: "DRAFT",
+        seoScore: 85,
+        initialVersion: {
           title: data.outline.h1,
-          slug: targetSlug,
-          excerpt: data.outline.metaDescription,
-          content: `# ${data.outline.h1}\n\n*Outline approved. Ready for section generation.*`,
-          focusKeyword: data.keyword,
+          content: `# ${data.outline.h1}\n\n*Outline approved.*`,
           metaTitle: data.outline.seoTitle,
-          metaDescription: data.outline.metaDescription,
-          status: "DRAFT",
-          seoScore: 85,
-          versions: {
-            create: {
-              versionNumber: 1,
-              title: data.outline.h1,
-              content: `# ${data.outline.h1}\n\n*Outline approved.*`,
-              metaTitle: data.outline.seoTitle,
-              metaDesc: data.outline.metaDescription,
-              changeSummary: "Draft generated from approved AI outline",
-              createdBy: user.email
-            }
-          }
+          metaDesc: data.outline.metaDescription,
+          changeSummary: "Draft generated from approved AI outline",
+          createdBy: user.email
         }
       });
     }

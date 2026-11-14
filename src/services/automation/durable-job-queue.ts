@@ -8,6 +8,8 @@ import { evaluateContentPublishingTransition, PublishingLifecycleState } from "@
 import { createCmsAdapter } from "@/services/cms/cms-adapter";
 import { decryptJsonCredentials } from "@/lib/crypto";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 
 export const DURABLE_JOB_TYPES = [
   "KEYWORD_RESEARCH",
@@ -306,25 +308,29 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
 
         let articleId = String(payload.articleId || "");
         if (targetWebsiteId && !articleId) {
-          const existingArt = await db.article.findUnique({
-            where: { websiteId_slug: { websiteId: targetWebsiteId, slug } }
-          });
+          const articleRepo = getArticleRepository();
+          const existingArt = await articleRepo.findArticleBySlug(targetWebsiteId, slug);
           const art =
             existingArt ||
-            (await db.article.create({
-              data: {
-                websiteId: targetWebsiteId,
+            (await articleRepo.createArticle({
+              websiteId: targetWebsiteId,
+              title,
+              slug,
+              content,
+              excerpt: "Durable background generated technical guide.",
+              metaTitle: `${title} | Technical Blueprint`,
+              metaDescription:
+                "Comprehensive technical blueprint for deploying Next.js SEO platforms on Vercel with external PostgreSQL and durable workers.",
+              canonicalUrl: `https://apextech.example.com/${slug}`,
+              status: "DRAFT",
+              wordCount: content.split(/\s+/).length,
+              seoScore: 92,
+              initialVersion: {
                 title,
-                slug,
                 content,
-                excerpt: "Durable background generated technical guide.",
                 metaTitle: `${title} | Technical Blueprint`,
-                metaDescription:
-                  "Comprehensive technical blueprint for deploying Next.js SEO platforms on Vercel with external PostgreSQL and durable workers.",
-                canonicalUrl: `https://apextech.example.com/${slug}`,
-                status: "DRAFT",
-                wordCount: content.split(/\s+/).length,
-                seoScore: 92
+                metaDesc: "Comprehensive technical blueprint for deploying Next.js SEO platforms on Vercel with external PostgreSQL and durable workers.",
+                changeSummary: "Durable job generation initial draft"
               }
             }));
           articleId = art.id;
@@ -343,17 +349,16 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
         const altText = String(payload.altText || "Architecture diagram of Vercel and durable worker queue");
         const imageUrl = String(payload.imageUrl || "/images/vercel-durable-worker-architecture.webp");
         if (articleId) {
-          await db.articleImage.create({
-            data: {
-              articleId,
-              url: imageUrl,
-              altText,
-              caption: "Figure 1: Decoupled Vercel Frontend + Durable Worker Queue",
-              provider: "LOCAL_SVG_RENDERER",
-              isFeatured: true,
-              width: 1200,
-              height: 630
-            }
+          const articleRepo = getArticleRepository();
+          await articleRepo.addImage({
+            articleId,
+            url: imageUrl,
+            altText,
+            caption: "Figure 1: Decoupled Vercel Frontend + Durable Worker Queue",
+            provider: "LOCAL_SVG_RENDERER",
+            isFeatured: true,
+            width: 1200,
+            height: 630
           });
         }
         resultData = {
@@ -438,16 +443,21 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
       case "AUTOMATED_PUBLISHING": {
         const articleId = String(payload.articleId || "");
         const websiteId = job.websiteId || String(payload.websiteId || "");
-        const article = await db.article.findFirst({
-          where: { id: articleId, ...(websiteId ? { websiteId } : {}) },
-          include: { website: true }
-        });
+        const articleRepo = getArticleRepository();
+        const websiteRepo = getWebsiteRepository();
 
-        if (!article) {
+        const article = await articleRepo.findArticleById(articleId);
+
+        if (!article || (websiteId && article.websiteId !== websiteId)) {
           throw new Error(`Article ${articleId} not found for automated publishing`);
         }
 
-        const pageUrl = `${article.website.url.replace(/\/$/, "")}/${article.slug}`;
+        const website = await websiteRepo.findWebsiteById(article.websiteId);
+        if (!website) {
+          throw new Error(`Website ${article.websiteId} not found for article ${articleId}`);
+        }
+
+        const pageUrl = `${website.url.replace(/\/$/, "")}/${article.slug}`;
         const gateDecision = evaluateContentPublishingTransition({
           articleId: article.id,
           websiteId: article.websiteId,
@@ -496,7 +506,7 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
             },
             content: { htmlContent: article.content },
             advertisingAndTechnical: {
-              siteUrl: article.website.url,
+              siteUrl: website.url,
               allowsMediapartnersGoogleCrawler: true,
               hasCmpConsentBannerConfigured: true
             }
@@ -504,10 +514,7 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
         });
 
         if (!gateDecision.transitionAllowed) {
-          await db.article.update({
-            where: { id: article.id },
-            data: { status: "NEEDS_REVIEW" }
-          });
+          await articleRepo.updateArticle(article.id, { status: "NEEDS_REVIEW" });
           resultData = {
             jobType: "AUTOMATED_PUBLISHING",
             published: false,
@@ -520,11 +527,11 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
 
         // Dispatch to CMS Adapter or internal Next.js public publication route
         const decryptedCreds = decryptJsonCredentials<Record<string, unknown>>(
-          article.website.encryptedCredentials
+          website.encryptedCredentials
         );
         const cmsAdapter = createCmsAdapter({
-          cmsType: article.website.cmsType,
-          siteUrl: article.website.url,
+          cmsType: website.cmsType,
+          siteUrl: website.url,
           credentials: decryptedCreds
         });
 
@@ -551,7 +558,7 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
           data: {
             websiteId: article.websiteId,
             articleId: article.id,
-            cmsType: article.website.cmsType,
+            cmsType: website.cmsType,
             status: "COMPLETED",
             startedAt: now,
             completedAt: new Date(),
@@ -565,14 +572,11 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
           }
         });
 
-        await db.article.update({
-          where: { id: article.id },
-          data: {
-            status: "PUBLISHED",
-            externalPostId,
-            publishedUrl,
-            publishedAt: new Date()
-          }
+        await articleRepo.updateArticle(article.id, {
+          status: "PUBLISHED",
+          externalPostId,
+          publishedUrl,
+          publishedAt: new Date()
         });
 
         resultData = {

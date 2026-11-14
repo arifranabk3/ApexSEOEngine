@@ -4,6 +4,7 @@ import { encryptJsonCredentials, encryptSecret } from "@/lib/crypto";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 import { getContentBriefRepository } from "@/repositories/content-brief-repository.factory";
+import { getArticleRepository } from "@/repositories/article-repository.factory";
 
 const DEFAULT_PERMISSIONS = [
   { code: "websites:read", module: "websites", action: "read", description: "View websites" },
@@ -271,8 +272,13 @@ export async function ensureSystemSeeded(): Promise<void> {
         status: "APPROVED"
       });
 
-      const article = await db.article.create({
-        data: {
+      const articleRepo = getArticleRepository();
+      const existingSeedArt = await articleRepo.findArticleBySlug(
+        primaryWebsite.id,
+        "self-hosted-ai-seo-pipeline-ollama-n8n"
+      );
+      if (!existingSeedArt) {
+        await articleRepo.createArticle({
           websiteId: primaryWebsite.id,
           categoryId: catArchitecture.id,
           briefId: brief.id,
@@ -286,22 +292,17 @@ export async function ensureSystemSeeded(): Promise<void> {
           metaTitle: "Self-Hosted AI SEO Pipeline with Ollama & n8n (Zero-Cost Guide)",
           metaDescription: "Learn how to architect a scalable zero-cost SEO automation system with local LLMs, n8n Community Edition, and WordPress REST API.",
           seoScore: 88,
-          wordCount: 410
-        }
-      });
-
-      await db.articleVersion.create({
-        data: {
-          articleId: article.id,
-          versionNumber: 1,
-          title: article.title,
-          content: article.content,
-          metaTitle: article.metaTitle,
-          metaDesc: article.metaDescription,
-          changeSummary: "Initial Phase 01 foundation draft",
-          createdBy: adminUser.email
-        }
-      });
+          wordCount: 410,
+          initialVersion: {
+            title: "How to Build a Self-Hosted AI SEO Pipeline with Ollama & n8n",
+            content: "# How to Build a Self-Hosted AI SEO Pipeline with Ollama & n8n\n\nThis foundational article demonstrates versioned content storage, SEO metadata tracking, and multi-CMS readiness in Phase 01.",
+            metaTitle: "Self-Hosted AI SEO Pipeline with Ollama & n8n (Zero-Cost Guide)",
+            metaDesc: "Learn how to architect a scalable zero-cost SEO automation system with local LLMs, n8n Community Edition, and WordPress REST API.",
+            changeSummary: "Initial Phase 01 foundation draft",
+            createdBy: adminUser.email
+          }
+        });
+      }
 
       // 6. Seed Default Automation Workflows
       await db.automationWorkflow.upsert({
@@ -432,33 +433,32 @@ export async function ensureSystemSeeded(): Promise<void> {
         }
       ];
 
+      const articleRepo = getArticleRepository();
       for (const item of showcaseArticles) {
-        await db.article.upsert({
-          where: {
-            websiteId_slug: {
-              websiteId: primarySite.id,
-              slug: item.slug
-            }
-          },
-          update: {},
-          create: {
-            websiteId: primarySite.id,
-            categoryId: item.categoryId,
-            authorId: adminUser.id,
+        await articleRepo.upsertArticle({
+          websiteId: primarySite.id,
+          categoryId: item.categoryId,
+          authorId: adminUser.id,
+          title: item.title,
+          slug: item.slug,
+          excerpt: item.excerpt,
+          content: item.content,
+          status: "PUBLISHED",
+          focusKeyword: item.focusKeyword,
+          metaTitle: item.metaTitle,
+          metaDescription: item.metaDescription,
+          canonicalUrl: `${primarySite.url.replace(/\/$/, "")}/${item.slug}`,
+          seoScore: item.seoScore,
+          wordCount: item.wordCount,
+          externalPostId: `pub-${item.slug}`,
+          publishedUrl: `/p/${primarySite.id}/${item.slug}`,
+          publishedAt: new Date(),
+          initialVersion: {
             title: item.title,
-            slug: item.slug,
-            excerpt: item.excerpt,
             content: item.content,
-            status: "PUBLISHED",
-            focusKeyword: item.focusKeyword,
             metaTitle: item.metaTitle,
-            metaDescription: item.metaDescription,
-            canonicalUrl: `${primarySite.url.replace(/\/$/, "")}/${item.slug}`,
-            seoScore: item.seoScore,
-            wordCount: item.wordCount,
-            externalPostId: `pub-${item.slug}`,
-            publishedUrl: `/p/${primarySite.id}/${item.slug}`,
-            publishedAt: new Date()
+            metaDesc: item.metaDescription,
+            changeSummary: "Seeded showcase published article"
           }
         });
       }
