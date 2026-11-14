@@ -1,5 +1,4 @@
 import crypto from "crypto";
-import { getDb } from "@/lib/db";
 import { calculateRetryBackoffMs } from "./workflow-engine";
 import { evaluateGoogleSearchComplianceGate } from "@/services/compliance/seo-quality-gate";
 import { evaluateAdSenseCompliance } from "@/services/compliance/adsense-compliance-engine";
@@ -533,9 +532,10 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
 
       case "SEARCH_PERFORMANCE_MONITORING": {
         const targetWebsiteId = job.websiteId || String(payload.websiteId || "");
-        const db = await getDb();
+        const { getSystemRepository } = await import("@/repositories/system-repository.factory");
+        const systemRepo = getSystemRepository();
         const rowCount = targetWebsiteId
-          ? await db.searchPerformance.count({ where: { websiteId: targetWebsiteId } })
+          ? await systemRepo.countSearchPerformance({ websiteId: targetWebsiteId })
           : 0;
         resultData = {
           jobType: "SEARCH_PERFORMANCE_MONITORING",

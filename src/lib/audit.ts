@@ -1,5 +1,4 @@
-import { Prisma } from "@prisma/client";
-import { getDb } from "./db";
+import { getSystemRepository } from "@/repositories/system-repository.factory";
 
 export interface AuditEntryInput {
   userId?: string | null;
@@ -36,22 +35,19 @@ export function sanitizeAuditMetadata(
 
 export async function recordAuditLog(entry: AuditEntryInput): Promise<void> {
   try {
-    const db = await getDb();
+    const repo = getSystemRepository();
     const safeMetadata = sanitizeAuditMetadata(entry.metadata);
-    await db.auditLog.create({
-      data: {
-        userId: entry.userId || null,
-        action: entry.action,
-        module: entry.module,
-        entityType: entry.entityType || null,
-        entityId: entry.entityId || null,
-        ipAddress: entry.ipAddress || "127.0.0.1",
-        userAgent: entry.userAgent || "system",
-        metadata: safeMetadata as Prisma.InputJsonValue
-      }
+    await repo.createAuditLog({
+      userId: entry.userId || null,
+      action: entry.action,
+      module: entry.module,
+      entityType: entry.entityType || null,
+      entityId: entry.entityId || null,
+      ipAddress: entry.ipAddress || "127.0.0.1",
+      userAgent: entry.userAgent || "system",
+      metadata: safeMetadata,
     });
   } catch (err) {
     console.error("[AuditLog] Failed to record audit event:", err);
   }
 }
-

@@ -67,17 +67,15 @@ export async function checkRateLimitDistributed(
 
   if (identifier.startsWith("login:")) {
     try {
-      const { getDb } = await import("./db");
-      const db = await getDb();
+      const { getSystemRepository } = await import("@/repositories/system-repository.factory");
+      const systemRepo = getSystemRepository();
       const ip = identifier.replace(/^login:/, "");
       const windowStart = new Date(Date.now() - windowMs);
 
-      const failedCount = await db.auditLog.count({
-        where: {
-          action: "AUTH_LOGIN_FAILED",
-          ipAddress: ip,
-          createdAt: { gte: windowStart }
-        }
+      const failedCount = await systemRepo.countAuditLogs({
+        action: "AUTH_LOGIN_FAILED",
+        ipAddress: ip,
+        startDate: windowStart,
       });
 
       if (failedCount >= maxRequests) {

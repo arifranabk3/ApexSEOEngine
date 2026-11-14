@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import { getDb } from "@/lib/db";
+import { getSystemRepository } from "@/repositories/system-repository.factory";
 import {
   SupportedCitySlug,
   SupportedCitySlugSchema,
@@ -115,11 +115,9 @@ export function normalizeSarafaCityData(
  */
 async function getPersistentCache(citySlug: SupportedCitySlug): Promise<CacheEntry | null> {
   try {
-    const db = await getDb();
+    const systemRepo = getSystemRepository();
     const settingKey = `gold_rates_cache_${citySlug}`;
-    const entry = await db.systemSetting.findUnique({
-      where: { key: settingKey }
-    });
+    const entry = await systemRepo.findSettingByKey(settingKey);
     if (!entry || !entry.value || typeof entry.value !== "object") return null;
 
     const val = entry.value as Record<string, unknown>;
@@ -144,20 +142,13 @@ async function setPersistentCache(
   expiresAtMs: number
 ): Promise<void> {
   try {
-    const db = await getDb();
+    const systemRepo = getSystemRepository();
     const settingKey = `gold_rates_cache_${citySlug}`;
-    await db.systemSetting.upsert({
-      where: { key: settingKey },
-      create: {
-        category: "FINANCE_CACHE",
-        key: settingKey,
-        value: { data, cachedAtMs, expiresAtMs },
-        description: `Persistent L2 gold rates cache for ${citySlug}`
-      },
-      update: {
-        value: { data, cachedAtMs, expiresAtMs },
-        updatedAt: new Date()
-      }
+    await systemRepo.upsertSetting({
+      category: "FINANCE_CACHE",
+      key: settingKey,
+      value: { data, cachedAtMs, expiresAtMs },
+      description: `Persistent L2 gold rates cache for ${citySlug}`
     });
   } catch {
     // Non-fatal, L1 memory cache continues to function
@@ -371,10 +362,8 @@ export async function resetGoldRateCacheForTesting(): Promise<void> {
   inFlightRequests.clear();
   lastKnownRemainingQuota = null;
   try {
-    const db = await getDb();
-    await db.systemSetting.deleteMany({
-      where: { category: "FINANCE_CACHE" }
-    });
+    const systemRepo = getSystemRepository();
+    await systemRepo.deleteSettingsByCategory("FINANCE_CACHE");
   } catch {
     // silent
   }

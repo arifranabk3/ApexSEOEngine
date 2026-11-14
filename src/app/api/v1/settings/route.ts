@@ -1,21 +1,20 @@
 import { NextRequest } from "next/server";
-import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiSuccess,
-  parseAndValidateBody,
-  requireApiAuth
+  requireApiAuth,
+  parseAndValidateBody
 } from "@/lib/api-response";
 import { encryptSecret, maskSecretValue } from "@/lib/crypto";
 import { recordAuditLog } from "@/lib/audit";
+import { getSystemRepository } from "@/repositories/system-repository.factory";
 
 const updateSettingsSchema = z.object({
   settings: z.array(
     z.object({
-      category: z.enum(["GENERAL", "SECURITY", "AI", "PUBLISHING", "AUTOMATION"]),
-      key: z.string().min(2),
+      category: z.string().min(1),
+      key: z.string().min(1),
       value: z.any(),
       isSecret: z.boolean().default(false),
       description: z.string().optional()
@@ -28,10 +27,8 @@ export async function GET(req: NextRequest) {
   const { errorResponse } = await requireApiAuth(req, "settings:read");
   if (errorResponse) return errorResponse;
 
-  const db = await getDb();
-  const settings = await db.systemSetting.findMany({
-    orderBy: [{ category: "asc" }, { key: "asc" }]
-  });
+  const systemRepo = getSystemRepository();
+  const settings = await systemRepo.findAllSettings();
 
   const safeSettings = settings.map((s) => ({
     id: s.id,
@@ -57,7 +54,7 @@ export async function PUT(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
+  const systemRepo = getSystemRepository();
   const updatedKeys: string[] = [];
 
   for (const item of data.settings) {
@@ -65,21 +62,12 @@ export async function PUT(req: NextRequest) {
       ? encryptSecret(String(item.value ?? ""))
       : item.value;
 
-    await db.systemSetting.upsert({
-      where: { key: item.key },
-      update: {
-        category: item.category,
-        value: storedValue as Prisma.InputJsonValue,
-        isSecret: item.isSecret,
-        description: item.description
-      },
-      create: {
-        category: item.category,
-        key: item.key,
-        value: storedValue as Prisma.InputJsonValue,
-        isSecret: item.isSecret,
-        description: item.description
-      }
+    await systemRepo.upsertSetting({
+      key: item.key,
+      value: storedValue,
+      category: item.category,
+      isSecret: item.isSecret,
+      description: item.description,
     });
     updatedKeys.push(item.key);
   }
@@ -88,8 +76,11 @@ export async function PUT(req: NextRequest) {
     userId: user.id,
     action: "SYSTEM_SETTINGS_UPDATED",
     module: "settings",
-    metadata: { updatedKeys }
+    metadata: {
+      updatedKeys,
+      count: updatedKeys.length
+    }
   });
 
-  return apiSuccess({ updatedKeys, count: updatedKeys.length });
+  return apiSuccess({ updatedCount: updatedKeys.length, keys: updatedKeys });
 }

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
+import { getSystemRepository } from "@/repositories/system-repository.factory";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -51,8 +51,6 @@ export async function POST(req: NextRequest) {
   );
   if (parseError || !data) return parseError!;
 
-  const db = await getDb();
-
   try {
     if (data.action === "audit_article") {
       const articleRepo = getArticleRepository();
@@ -83,14 +81,12 @@ export async function POST(req: NextRequest) {
       });
 
       // Retrieve existing human reviewer decisions from AuditLog for this article
-      const decisionLogs = await db.auditLog.findMany({
-        where: {
-          action: "RECORD_CLAIM_DECISION",
-          module: "SEO_FACTUAL_REVIEW",
-          entityType: "Article",
-          entityId: article.id
-        },
-        orderBy: { createdAt: "desc" }
+      const systemRepo = getSystemRepository();
+      const decisionLogs = await systemRepo.findAuditLogs({
+        action: "RECORD_CLAIM_DECISION",
+        module: "SEO_FACTUAL_REVIEW",
+        entityType: "Article",
+        entityId: article.id,
       });
 
       // Apply the most recent decision for each claimId

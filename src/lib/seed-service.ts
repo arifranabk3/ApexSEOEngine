@@ -532,12 +532,19 @@ export async function ensureSystemSeeded(): Promise<void> {
       }
     ];
 
+    const { getSystemRepository } = await import("@/repositories/system-repository.factory");
+    const systemRepo = getSystemRepository();
     for (const s of defaultSettings) {
-      await db.systemSetting.upsert({
-        where: { key: s.key },
-        update: {},
-        create: s
-      });
+      const existing = await systemRepo.findSettingByKey(s.key);
+      if (!existing) {
+        await systemRepo.upsertSetting({
+          key: s.key,
+          value: s.value,
+          category: s.category,
+          isSecret: s.isSecret,
+          description: s.description,
+        });
+      }
     }
   })();
 
