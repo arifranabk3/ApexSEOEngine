@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -15,6 +14,7 @@ import {
 } from "@/lib/crypto";
 import { createAIAdapter } from "@/services/ai/provider-adapter";
 import { recordAuditLog } from "@/lib/audit";
+import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 
 const createProviderSchema = z.object({
   name: z.string().min(2, "Provider name required"),
@@ -63,15 +63,8 @@ export async function GET(req: NextRequest) {
   const { errorResponse } = await requireApiAuth(req, "ai:read");
   if (errorResponse) return errorResponse;
 
-  const db = await getDb();
-  const providers = await db.aIProvider.findMany({
-    orderBy: { createdAt: "asc" },
-    include: {
-      models: {
-        orderBy: { isDefault: "desc" }
-      }
-    }
-  });
+  const repo = getAIConfigRepository();
+  const providers = await repo.findAllProviders();
 
   const sanitized = providers.map((p) => ({
     id: p.id,
@@ -102,34 +95,28 @@ export async function POST(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
-  const existing = await db.aIProvider.findUnique({ where: { name: data.name } });
+  const repo = getAIConfigRepository();
+  const existing = await repo.findProviderByName(data.name);
   if (existing) {
     return apiError("DUPLICATE_PROVIDER", `AI Provider ${data.name} already exists`, 409);
   }
 
   const encryptedApiKey = data.apiKey ? encryptSecret(data.apiKey) : null;
 
-  const created = await db.aIProvider.create({
-    data: {
-      name: data.name,
-      providerType: data.providerType,
-      baseUrl: data.baseUrl,
-      encryptedApiKey,
-      isLocal: data.isLocal,
-      isEnabled: data.isEnabled,
-      status: "CONFIGURED",
-      models: {
-        create: {
-          name: data.defaultModelName || "Llama 3.2 Local",
-          modelId: data.defaultModelId || "llama3.2:latest",
-          contextWindow: 32768,
-          isDefault: true,
-          isEnabled: true
-        }
-      }
-    },
-    include: { models: true }
+  const created = await repo.createProvider({
+    name: data.name,
+    providerType: data.providerType,
+    baseUrl: data.baseUrl,
+    encryptedApiKey,
+    isLocal: data.isLocal,
+    isEnabled: data.isEnabled,
+    status: "CONFIGURED",
+    defaultModel: {
+      name: data.defaultModelName || "Llama 3.2 Local",
+      modelId: data.defaultModelId || "llama3.2:latest",
+      contextWindow: 32768,
+      isDefault: true
+    }
   });
 
   await recordAuditLog({
@@ -165,12 +152,10 @@ export async function PATCH(req: NextRequest) {
   const { data, errorResponse: valErr } = await parseAndValidateBody(req, actionSchema);
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
+  const repo = getAIConfigRepository();
 
   if (data.action === "test_connection") {
-    const provider = await db.aIProvider.findUnique({
-      where: { id: data.providerId }
-    });
+    const provider = await repo.findProviderById(data.providerId);
     if (!provider) {
       return apiError("PROVIDER_NOT_FOUND", "AI provider not found", 404);
     }
@@ -188,22 +173,17 @@ export async function PATCH(req: NextRequest) {
 
     const result = await adapter.testConnection();
 
-    await db.aIProvider.update({
-      where: { id: provider.id },
-      data: {
-        status: result.connected ? "ONLINE" : "OFFLINE_READY",
-        lastCheckedAt: new Date(),
-        totalRequests: { increment: 1 }
-      }
+    await repo.updateProvider(provider.id, {
+      status: result.connected ? "ONLINE" : "OFFLINE_READY",
+      lastCheckedAt: new Date(),
+      incrementRequests: true
     });
 
     return apiSuccess({ testResult: result });
   }
 
   if (data.action === "discover_models") {
-    const provider = await db.aIProvider.findUnique({
-      where: { id: data.providerId }
-    });
+    const provider = await repo.findProviderById(data.providerId);
     if (!provider) {
       return apiError("PROVIDER_NOT_FOUND", "AI provider not found", 404);
     }
@@ -243,9 +223,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (data.action === "verify_model") {
-    const provider = await db.aIProvider.findUnique({
-      where: { id: data.providerId }
-    });
+    const provider = await repo.findProviderById(data.providerId);
     if (!provider) {
       return apiError("PROVIDER_NOT_FOUND", "AI provider not found", 404);
     }
@@ -278,29 +256,24 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (data.action === "add_model") {
-    if (data.isDefault) {
-      await db.aIModel.updateMany({
-        where: { providerId: data.providerId },
-        data: { isDefault: false }
-      });
-    }
-    const model = await db.aIModel.create({
-      data: {
-        providerId: data.providerId,
-        name: data.name,
-        modelId: data.modelId,
-        contextWindow: data.contextWindow,
-        isDefault: data.isDefault,
-        isEnabled: true
-      }
+    const model = await repo.addModel({
+      providerId: data.providerId,
+      name: data.name,
+      modelId: data.modelId,
+      contextWindow: data.contextWindow,
+      isDefault: data.isDefault,
+      isEnabled: true
     });
     return apiSuccess({ model }, 201);
   }
 
-  const updated = await db.aIProvider.update({
-    where: { id: data.providerId },
-    data: { isEnabled: data.isEnabled }
+  const updated = await repo.updateProvider(data.providerId, {
+    isEnabled: data.isEnabled
   });
+
+  if (!updated) {
+    return apiError("PROVIDER_NOT_FOUND", "AI provider not found", 404);
+  }
 
   return apiSuccess({ providerId: updated.id, isEnabled: updated.isEnabled });
 }

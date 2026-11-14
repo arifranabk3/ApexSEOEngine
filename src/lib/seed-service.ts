@@ -1,6 +1,7 @@
 import { getDb } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { encryptJsonCredentials, encryptSecret } from "@/lib/crypto";
+import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 
 const DEFAULT_PERMISSIONS = [
   { code: "websites:read", module: "websites", action: "read", description: "View websites" },
@@ -120,63 +121,42 @@ export async function ensureSystemSeeded(): Promise<void> {
       });
     }
 
-    // 4. Seed Default Local Ollama AI Provider (Zero-Cost Policy)
+    // 4. Seed Default Local Ollama AI Provider (Zero-Cost Policy) via Mongo Repository
     const defaultOllamaUrl = process.env.DEFAULT_OLLAMA_BASE_URL || "http://localhost:11434";
-    const ollamaProvider = await db.aIProvider.upsert({
-      where: { name: "Local Ollama Engine" },
-      update: {},
-      create: {
-        name: "Local Ollama Engine",
-        providerType: "OLLAMA",
-        baseUrl: defaultOllamaUrl,
-        isLocal: true,
-        isEnabled: true,
-        status: "READY",
-        config: {
-          zeroCostCompliant: true,
-          timeoutMs: 30000
-        }
+    const aiConfigRepo = getAIConfigRepository();
+    const ollamaProvider = await aiConfigRepo.upsertProvider({
+      name: "Local Ollama Engine",
+      providerType: "OLLAMA",
+      baseUrl: defaultOllamaUrl,
+      isLocal: true,
+      isEnabled: true,
+      status: "READY",
+      config: {
+        zeroCostCompliant: true,
+        timeoutMs: 30000
       }
     });
 
-    await db.aIModel.upsert({
-      where: {
-        providerId_modelId: {
-          providerId: ollamaProvider.id,
-          modelId: "llama3.2:latest"
-        }
-      },
-      update: {},
-      create: {
-        providerId: ollamaProvider.id,
-        name: "Llama 3.2 (Local 8B)",
-        modelId: "llama3.2:latest",
-        capabilities: ["text", "clustering", "briefs", "seo-optimization"],
-        contextWindow: 128000,
-        temperature: 0.6,
-        isDefault: true,
-        isEnabled: true
-      }
+    await aiConfigRepo.upsertModel({
+      providerId: ollamaProvider.id,
+      name: "Llama 3.2 (Local 8B)",
+      modelId: "llama3.2:latest",
+      capabilities: ["text", "clustering", "briefs", "seo-optimization"],
+      contextWindow: 128000,
+      temperature: 0.6,
+      isDefault: true,
+      isEnabled: true
     });
 
-    await db.aIModel.upsert({
-      where: {
-        providerId_modelId: {
-          providerId: ollamaProvider.id,
-          modelId: "nomic-embed-text:latest"
-        }
-      },
-      update: {},
-      create: {
-        providerId: ollamaProvider.id,
-        name: "Nomic Embed Text (Local Semantic Clustering)",
-        modelId: "nomic-embed-text:latest",
-        capabilities: ["embeddings", "clustering", "internal-linking"],
-        contextWindow: 8192,
-        temperature: 0.0,
-        isDefault: false,
-        isEnabled: true
-      }
+    await aiConfigRepo.upsertModel({
+      providerId: ollamaProvider.id,
+      name: "Nomic Embed Text (Local Semantic Clustering)",
+      modelId: "nomic-embed-text:latest",
+      capabilities: ["embeddings", "clustering", "internal-linking"],
+      contextWindow: 8192,
+      temperature: 0.0,
+      isDefault: false,
+      isEnabled: true
     });
 
     // 5. Seed Default Primary Website & Categories if none exist

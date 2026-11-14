@@ -11,6 +11,7 @@ import {
 import { decryptSecret } from "@/lib/crypto";
 import { recordAuditLog } from "@/lib/audit";
 import { createAIAdapter } from "@/services/ai/provider-adapter";
+import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 import {
   TopicAnalysisOutputSchema,
   TopicClusterOutputSchema,
@@ -251,18 +252,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 3. AI STAGES: Resolve enabled AI provider & model
-  const provider = await db.aIProvider.findFirst({
-    where: { isEnabled: true },
-    include: {
-      models: {
-        where: { isEnabled: true },
-        orderBy: { isDefault: "desc" }
-      }
-    }
-  });
+  // 3. AI STAGES: Resolve enabled AI provider & model via Mongo repository
+  const aiConfigRepo = getAIConfigRepository();
+  const activeConfig = await aiConfigRepo.findFirstEnabledWithDefaultModel();
 
-  if (!provider) {
+  if (!activeConfig) {
     return apiError(
       "NO_AI_PROVIDER_AVAILABLE",
       "No active AI provider configured. Please check AI Providers in settings.",
@@ -270,7 +264,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const model = provider.models[0];
+  const { provider, defaultModel: model } = activeConfig;
   const modelId = model?.modelId || "llama3.2:latest";
   const decryptedKey = provider.encryptedApiKey
     ? decryptSecret(provider.encryptedApiKey)

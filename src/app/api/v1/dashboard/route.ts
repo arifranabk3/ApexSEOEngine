@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import { apiSuccess, requireApiAuth } from "@/lib/api-response";
 import { DashboardSummaryMetrics } from "@/types/domain";
+import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 
 export async function GET(req: NextRequest) {
   await ensureSystemSeeded();
@@ -23,9 +24,8 @@ export async function GET(req: NextRequest) {
   const activeAutomations = await db.automationWorkflow.count({
     where: { isEnabled: true }
   });
-  const healthyAIProviders = await db.aIProvider.count({
-    where: { isEnabled: true }
-  });
+  const aiConfigRepo = getAIConfigRepository();
+  const healthyAIProviders = await aiConfigRepo.countHealthyProviders();
 
   const perfRecords = await db.searchPerformance.findMany({
     take: 500,
