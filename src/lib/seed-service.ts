@@ -2,6 +2,7 @@ import { getDb } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { encryptJsonCredentials, encryptSecret } from "@/lib/crypto";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
+import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 
 const DEFAULT_PERMISSIONS = [
   { code: "websites:read", module: "websites", action: "read", description: "View websites" },
@@ -221,35 +222,31 @@ export async function ensureSystemSeeded(): Promise<void> {
         ]
       });
 
-      const catArchitecture = await db.category.create({
-        data: {
-          websiteId: primaryWebsite.id,
-          name: "AI & Automation",
-          slug: "ai-automation",
-          description: "Open-source AI workflows and technical SEO guides"
-        }
+      const keywordRepo = getKeywordDomainRepository();
+
+      const catArchitecture = await keywordRepo.upsertCategory({
+        websiteId: primaryWebsite.id,
+        name: "AI & Automation",
+        slug: "ai-automation",
+        description: "Open-source AI workflows and technical SEO guides"
       });
 
-      const cluster = await db.keywordCluster.create({
-        data: {
-          websiteId: primaryWebsite.id,
-          name: "Local LLM SEO Automation",
-          pillarKeyword: "open source ai seo automation",
-          intent: "INFORMATIONAL",
-          status: "ACTIVE"
-        }
+      const cluster = await keywordRepo.createCluster({
+        websiteId: primaryWebsite.id,
+        name: "Local LLM SEO Automation",
+        pillarKeyword: "open source ai seo automation",
+        intent: "INFORMATIONAL",
+        status: "ACTIVE"
       });
 
-      const keyword = await db.keyword.create({
-        data: {
-          websiteId: primaryWebsite.id,
-          clusterId: cluster.id,
-          term: "self hosted seo automation with ollama",
-          searchIntent: "INFORMATIONAL",
-          searchVolume: 0,
-          difficulty: 0,
-          status: "TRACKED"
-        }
+      const keyword = await keywordRepo.upsertKeyword({
+        websiteId: primaryWebsite.id,
+        clusterId: cluster.id,
+        term: "self hosted seo automation with ollama",
+        searchIntent: "INFORMATIONAL",
+        searchVolume: 0,
+        difficulty: 0,
+        status: "TRACKED"
       });
 
       const brief = await db.contentBrief.create({
@@ -342,36 +339,19 @@ export async function ensureSystemSeeded(): Promise<void> {
     // 6b. Ensure Public Showcase Published Articles exist in PostgreSQL for the Frontend Website
     const primarySite = await db.website.findFirst({ orderBy: { createdAt: "asc" } });
     if (primarySite) {
-      const catTech = await db.category.upsert({
-        where: {
-          websiteId_slug: {
-            websiteId: primarySite.id,
-            slug: "technical-seo-architecture"
-          }
-        },
-        update: {},
-        create: {
-          websiteId: primarySite.id,
-          name: "Technical SEO & Architecture",
-          slug: "technical-seo-architecture",
-          description: "Google Search Essentials, Core Web Vitals, and Vercel-First publishing blueprints"
-        }
+      const keywordRepo = getKeywordDomainRepository();
+      const catTech = await keywordRepo.upsertCategory({
+        websiteId: primarySite.id,
+        name: "Technical SEO & Architecture",
+        slug: "technical-seo-architecture",
+        description: "Google Search Essentials, Core Web Vitals, and Vercel-First publishing blueprints"
       });
 
-      const catAdsense = await db.category.upsert({
-        where: {
-          websiteId_slug: {
-            websiteId: primarySite.id,
-            slug: "publisher-compliance"
-          }
-        },
-        update: {},
-        create: {
-          websiteId: primarySite.id,
-          name: "Publisher & AdSense Compliance",
-          slug: "publisher-compliance",
-          description: "E-E-A-T verification, ads.txt governance, and Invalid Traffic (IVT) protection"
-        }
+      const catAdsense = await keywordRepo.upsertCategory({
+        websiteId: primarySite.id,
+        name: "Publisher & AdSense Compliance",
+        slug: "publisher-compliance",
+        description: "E-E-A-T verification, ads.txt governance, and Invalid Traffic (IVT) protection"
       });
 
       const showcaseArticles = [

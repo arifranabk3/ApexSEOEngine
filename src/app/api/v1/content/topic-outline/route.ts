@@ -12,6 +12,7 @@ import { decryptSecret } from "@/lib/crypto";
 import { recordAuditLog } from "@/lib/audit";
 import { createAIAdapter } from "@/services/ai/provider-adapter";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
+import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 import {
   TopicAnalysisOutputSchema,
   TopicClusterOutputSchema,
@@ -107,65 +108,41 @@ export async function POST(req: NextRequest) {
     return apiSuccess({ validation });
   }
 
-  // 2. STAGE: SAVE PLAN (Persist KeywordCluster, Keywords, ContentBrief & optional Article draft)
+  // 2. STAGE: SAVE PLAN (Persist KeywordCluster, Keywords via Mongo Repository, ContentBrief & optional Article draft)
   if (data.stage === "save_plan") {
     let clusterRecordId: string | undefined;
+    const keywordRepo = getKeywordDomainRepository();
 
     // A. Persist cluster if provided
     if (data.cluster) {
-      const clusterRecord = await db.keywordCluster.create({
-        data: {
-          websiteId: website.id,
-          name: data.cluster.clusterName,
-          pillarKeyword: data.cluster.pillarKeyword,
-          intent: data.cluster.intent,
-          status: "PLANNED"
-        }
+      const clusterRecord = await keywordRepo.createCluster({
+        websiteId: website.id,
+        name: data.cluster.clusterName,
+        pillarKeyword: data.cluster.pillarKeyword,
+        intent: data.cluster.intent,
+        status: "PLANNED"
       });
       clusterRecordId = clusterRecord.id;
 
       // Add supporting keywords under cluster
       for (const sup of data.cluster.supportingArticles) {
-        await db.keyword.upsert({
-          where: {
-            websiteId_term: {
-              websiteId: website.id,
-              term: sup.targetKeyword
-            }
-          },
-          update: {
-            clusterId: clusterRecord.id,
-            searchIntent: sup.intent
-          },
-          create: {
-            websiteId: website.id,
-            clusterId: clusterRecord.id,
-            term: sup.targetKeyword,
-            searchIntent: sup.intent,
-            status: "PLANNED"
-          }
+        await keywordRepo.upsertKeyword({
+          websiteId: website.id,
+          clusterId: clusterRecord.id,
+          term: sup.targetKeyword,
+          searchIntent: sup.intent,
+          status: "PLANNED"
         });
       }
     }
 
     // B. Upsert main focus keyword
-    const mainKeyword = await db.keyword.upsert({
-      where: {
-        websiteId_term: {
-          websiteId: website.id,
-          term: data.keyword
-        }
-      },
-      update: {
-        clusterId: clusterRecordId ?? null
-      },
-      create: {
-        websiteId: website.id,
-        term: data.keyword,
-        clusterId: clusterRecordId ?? null,
-        searchIntent: data.cluster?.intent ?? "INFORMATIONAL",
-        status: "TARGETED"
-      }
+    const mainKeyword = await keywordRepo.upsertKeyword({
+      websiteId: website.id,
+      term: data.keyword,
+      clusterId: clusterRecordId ?? null,
+      searchIntent: data.cluster?.intent ?? "INFORMATIONAL",
+      status: "TARGETED"
     });
 
     // C. Create ContentBrief

@@ -7,6 +7,7 @@ import { evaluateAdSenseCompliance } from "@/services/compliance/adsense-complia
 import { evaluateContentPublishingTransition, PublishingLifecycleState } from "@/services/compliance/publishing-gate-workflow";
 import { createCmsAdapter } from "@/services/cms/cms-adapter";
 import { decryptJsonCredentials } from "@/lib/crypto";
+import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 
 export const DURABLE_JOB_TYPES = [
   "KEYWORD_RESEARCH",
@@ -274,22 +275,14 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
         const seedTerm = String(payload.seedTerm || "self hosted ai seo");
         const targetWebsiteId = job.websiteId || String(payload.websiteId || "");
         if (targetWebsiteId) {
-          await db.keyword.upsert({
-            where: {
-              websiteId_term: {
-                websiteId: targetWebsiteId,
-                term: seedTerm
-              }
-            },
-            update: { status: "TRACKED" },
-            create: {
-              websiteId: targetWebsiteId,
-              term: seedTerm,
-              searchIntent: String(payload.searchIntent || "INFORMATIONAL"),
-              searchVolume: 0,
-              difficulty: 0,
-              status: "TRACKED"
-            }
+          const keywordRepo = getKeywordDomainRepository();
+          await keywordRepo.upsertKeyword({
+            websiteId: targetWebsiteId,
+            term: seedTerm,
+            searchIntent: String(payload.searchIntent || "INFORMATIONAL"),
+            searchVolume: 0,
+            difficulty: 0,
+            status: "TRACKED"
           });
         }
         resultData = {

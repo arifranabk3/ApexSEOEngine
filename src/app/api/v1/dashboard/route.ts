@@ -4,6 +4,7 @@ import { ensureSystemSeeded } from "@/lib/seed-service";
 import { apiSuccess, requireApiAuth } from "@/lib/api-response";
 import { DashboardSummaryMetrics } from "@/types/domain";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
+import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 
 export async function GET(req: NextRequest) {
   await ensureSystemSeeded();
@@ -13,8 +14,9 @@ export async function GET(req: NextRequest) {
   const db = await getDb();
 
   const totalWebsites = await db.website.count();
-  const totalKeywords = await db.keyword.count();
-  const totalKeywordClusters = await db.keywordCluster.count();
+  const keywordRepo = getKeywordDomainRepository();
+  const totalKeywords = await keywordRepo.countKeywords();
+  const totalKeywordClusters = await keywordRepo.countClusters();
   const totalArticles = await db.article.count();
   const publishedArticles = await db.article.count({ where: { status: "PUBLISHED" } });
   const draftArticles = await db.article.count({ where: { status: "DRAFT" } });

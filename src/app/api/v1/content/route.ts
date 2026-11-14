@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-response";
 import { recordAuditLog } from "@/lib/audit";
 import { evaluateGoogleSearchComplianceGate } from "@/services/compliance/seo-quality-gate";
+import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 
 const createArticleSchema = z.object({
   websiteId: z.string().min(1),
@@ -59,10 +60,10 @@ export async function GET(req: NextRequest) {
     }
   });
 
-  const categories = await db.category.findMany({
-    where: websiteId ? { websiteId } : undefined,
-    orderBy: { name: "asc" }
-  });
+  const keywordRepo = getKeywordDomainRepository();
+  const categories = websiteId
+    ? await keywordRepo.findCategoriesByWebsite(websiteId)
+    : [];
 
   return apiSuccess({ articles, categories });
 }
