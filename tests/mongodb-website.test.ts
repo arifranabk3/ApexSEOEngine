@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { MongoWebsiteRepository } from "@/repositories/website-repository.factory";
 import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 import { migrateWebsitesToMongo } from "@/services/migration/website-migration-engine";
 import { encryptJsonCredentials, decryptJsonCredentials, hasEncryptedCredentials } from "@/lib/crypto";
