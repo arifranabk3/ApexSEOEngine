@@ -42,6 +42,10 @@ export const SarafaRatesObjectSchema = z.object({
 export const SarafaCityDataSchema = z.object({
   city: z.string().optional(),
   slug: z.string().optional(),
+  metal: z.string().optional(),
+  rate_24k_tola: z.number().nullable().optional(),
+  adjustment: z.number().nullable().optional(),
+  adjustment_percent: z.number().nullable().optional(),
   currency: z.string().default("PKR"),
   last_updated: z.string().optional(),
   rates: z.object({
@@ -50,11 +54,15 @@ export const SarafaCityDataSchema = z.object({
   }).passthrough().optional()
 }).passthrough();
 
-export const SarafaApiResponseSchema = z.object({
-  status: z.string().optional(),
-  code: z.number().optional(),
-  data: z.union([SarafaCityDataSchema, z.array(SarafaCityDataSchema)]).optional()
-}).passthrough();
+export const SarafaApiResponseSchema = z.union([
+  SarafaCityDataSchema,
+  z.array(SarafaCityDataSchema),
+  z.object({
+    status: z.string().optional(),
+    code: z.number().optional(),
+    data: z.union([SarafaCityDataSchema, z.array(SarafaCityDataSchema)]).optional()
+  }).passthrough()
+]);
 
 // ============================================================================
 // 3. NORMALIZED DOMAIN MODELS FOR APEX DASHBOARD

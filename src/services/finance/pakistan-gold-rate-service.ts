@@ -55,13 +55,24 @@ export function normalizeSarafaCityData(
   const tola = rawCity.rates?.tola || {};
   const gram10 = rawCity.rates?.gram_10 || {};
 
+  // Check if flat rate_24k_tola is present (API v1 endpoint format)
+  const direct24kTola = typeof rawCity.rate_24k_tola === "number" ? rawCity.rate_24k_tola : null;
+
   const buildPurity = (
     purity: "24K" | "22K" | "21K" | "18K",
     label: string,
-    tolaKey: "gold_24k" | "gold_22k" | "gold_21k" | "gold_18k"
+    tolaKey: "gold_24k" | "gold_22k" | "gold_21k" | "gold_18k",
+    purityRatio: number
   ) => {
-    const perTola = typeof tola[tolaKey] === "number" ? tola[tolaKey]! : null;
-    const per10G = typeof gram10[tolaKey] === "number" ? gram10[tolaKey]! : null;
+    let perTola = typeof tola[tolaKey] === "number" ? tola[tolaKey]! : null;
+    let per10G = typeof gram10[tolaKey] === "number" ? gram10[tolaKey]! : null;
+
+    // If flat direct24kTola is used and nested tola/gram_10 object is absent
+    if (!rawCity.rates && direct24kTola !== null) {
+      perTola = Math.round(direct24kTola * purityRatio);
+      per10G = Math.round((perTola / 11.6638) * 10);
+    }
+
     const perGram = per10G !== null ? Math.round((per10G / 10) * 100) / 100 : null;
 
     return {
@@ -79,12 +90,12 @@ export function normalizeSarafaCityData(
   return {
     citySlug,
     cityName: CITY_DISPLAY_NAMES[citySlug] || rawCity.city || citySlug,
-    currency: "PKR",
+    currency: "PKR" as const,
     rates: {
-      "24K": buildPurity("24K", "24 Karat (Pure Gold)", "gold_24k"),
-      "22K": buildPurity("22K", "22 Karat (Jewelry)", "gold_22k"),
-      "21K": buildPurity("21K", "21 Karat", "gold_21k"),
-      "18K": buildPurity("18K", "18 Karat", "gold_18k")
+      "24K": buildPurity("24K", "24 Karat (Pure Gold)", "gold_24k", 1.0),
+      "22K": buildPurity("22K", "22 Karat (Jewelry)", "gold_22k", 22 / 24),
+      "21K": buildPurity("21K", "21 Karat", "gold_21k", 21 / 24),
+      "18K": buildPurity("18K", "18 Karat", "gold_18k", 18 / 24)
     },
     pathoor24kPerTola: pathoor,
     providerTimestamp: rawCity.last_updated || new Date().toISOString(),
@@ -295,9 +306,18 @@ export async function getPakistanGoldRates(
         throw new Error("Invalid response format received from Sarafa.pk");
       }
 
-      const rawData = parsed.data.data;
-      const cityData = Array.isArray(rawData) ? rawData[0] : rawData;
-      if (!cityData) {
+      let rawCityData: z.infer<typeof SarafaCityDataSchema> | undefined;
+      const parsedData = parsed.data;
+      if ("data" in parsedData && parsedData.data) {
+        const d = parsedData.data;
+        rawCityData = Array.isArray(d) ? d[0] : d;
+      } else if (Array.isArray(parsedData)) {
+        rawCityData = parsedData[0];
+      } else {
+        rawCityData = parsedData as z.infer<typeof SarafaCityDataSchema>;
+      }
+
+      if (!rawCityData) {
         throw new Error(`No rate data found in provider response for city '${citySlug}'`);
       }
 
@@ -305,7 +325,7 @@ export async function getPakistanGoldRates(
       const expiresAt = new Date(nowMs + CACHE_TTL_MS);
       const normalized = normalizeSarafaCityData(
         citySlug,
-        cityData,
+        rawCityData,
         cachedAt,
         expiresAt,
         false,
