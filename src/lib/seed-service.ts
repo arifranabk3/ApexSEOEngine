@@ -111,6 +111,13 @@ export async function ensureSystemSeeded(): Promise<void> {
           roleId: superAdminRole.id
         }
       });
+    } else if (adminUser.passwordChangedAt === null && !adminUser.mustChangePassword) {
+      // If admin was seeded prior to the security hardening migration and has never changed password,
+      // enforce the mandatory password rotation requirement
+      adminUser = await db.user.update({
+        where: { id: adminUser.id },
+        data: { mustChangePassword: true }
+      });
     }
 
     // 4. Seed Default Local Ollama AI Provider (Zero-Cost Policy)
