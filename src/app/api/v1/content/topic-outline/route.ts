@@ -13,6 +13,7 @@ import { recordAuditLog } from "@/lib/audit";
 import { createAIAdapter } from "@/services/ai/provider-adapter";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
+import { getContentBriefRepository } from "@/repositories/content-brief-repository.factory";
 import {
   TopicAnalysisOutputSchema,
   TopicClusterOutputSchema,
@@ -145,18 +146,17 @@ export async function POST(req: NextRequest) {
       status: "TARGETED"
     });
 
-    // C. Create ContentBrief
-    const brief = await db.contentBrief.create({
-      data: {
-        websiteId: website.id,
-        keywordId: mainKeyword.id,
-        clusterId: clusterRecordId ?? null,
-        title: data.outline.seoTitle,
-        searchIntent: data.cluster?.intent ?? "INFORMATIONAL",
-        outline: JSON.parse(JSON.stringify(data.outline)),
-        secondaryKeywords: data.cluster?.supportingArticles.map((s) => s.targetKeyword) || [],
-        status: "APPROVED"
-      }
+    // C. Create ContentBrief via Mongo Repository
+    const contentBriefRepo = getContentBriefRepository();
+    const brief = await contentBriefRepo.createBrief({
+      websiteId: website.id,
+      keywordId: mainKeyword.id,
+      clusterId: clusterRecordId ?? null,
+      title: data.outline.seoTitle,
+      searchIntent: data.cluster?.intent ?? "INFORMATIONAL",
+      outline: JSON.parse(JSON.stringify(data.outline)),
+      secondaryKeywords: data.cluster?.supportingArticles.map((s) => s.targetKeyword) || [],
+      status: "APPROVED"
     });
 
     // D. Optionally create draft Article with initial version

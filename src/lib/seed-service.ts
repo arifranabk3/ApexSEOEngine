@@ -3,6 +3,7 @@ import { hashPassword } from "@/lib/auth";
 import { encryptJsonCredentials, encryptSecret } from "@/lib/crypto";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
+import { getContentBriefRepository } from "@/repositories/content-brief-repository.factory";
 
 const DEFAULT_PERMISSIONS = [
   { code: "websites:read", module: "websites", action: "read", description: "View websites" },
@@ -249,21 +250,20 @@ export async function ensureSystemSeeded(): Promise<void> {
         status: "TRACKED"
       });
 
-      const brief = await db.contentBrief.create({
-        data: {
-          websiteId: primaryWebsite.id,
-          keywordId: keyword.id,
-          clusterId: cluster.id,
-          title: "How to Build a Self-Hosted AI SEO Pipeline with Ollama & n8n",
-          targetWordCount: 1800,
-          searchIntent: "INFORMATIONAL",
-          outline: [
-            "H2: Zero-Cost SEO Architecture Principles",
-            "H2: Connecting Local Ollama Models",
-            "H2: Automating WordPress Publishing with n8n Community Edition"
-          ],
-          status: "APPROVED"
-        }
+      const contentBriefRepo = getContentBriefRepository();
+      const brief = await contentBriefRepo.upsertBrief({
+        websiteId: primaryWebsite.id,
+        keywordId: keyword.id,
+        clusterId: cluster.id,
+        title: "How to Build a Self-Hosted AI SEO Pipeline with Ollama & n8n",
+        targetWordCount: 1800,
+        searchIntent: "INFORMATIONAL",
+        outline: [
+          "H2: Zero-Cost SEO Architecture Principles",
+          "H2: Connecting Local Ollama Models",
+          "H2: Automating WordPress Publishing with n8n Community Edition"
+        ],
+        status: "APPROVED"
       });
 
       const article = await db.article.create({
