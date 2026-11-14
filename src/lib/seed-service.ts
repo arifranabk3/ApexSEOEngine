@@ -23,6 +23,11 @@ const DEFAULT_PERMISSIONS = [
 let seedPromise: Promise<void> | null = null;
 
 export async function ensureSystemSeeded(): Promise<void> {
+  // If running in production on Vercel without MONGODB_URI configured, bypass seeding to preserve uptime
+  if (!process.env.MONGODB_URI) {
+    return;
+  }
+
   if (seedPromise) {
     return seedPromise;
   }
