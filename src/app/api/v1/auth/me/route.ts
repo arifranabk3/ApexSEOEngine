@@ -7,6 +7,15 @@ export async function GET(req: NextRequest) {
   const { user, errorResponse } = await requireApiAuth(req);
   if (errorResponse || !user) return errorResponse!;
 
-  return apiSuccess({ user });
+  return apiSuccess({
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      roleName: user.roleName,
+      permissions: user.permissions,
+      mustChangePassword: Boolean(user.mustChangePassword)
+    }
+  });
 }
 

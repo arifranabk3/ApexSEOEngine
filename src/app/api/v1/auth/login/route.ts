@@ -8,7 +8,7 @@ import {
 import { apiError, apiSuccess, parseAndValidateBody } from "@/lib/api-response";
 import { recordAuditLog } from "@/lib/audit";
 import { ensureSystemSeeded } from "@/lib/seed-service";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimitDistributed } from "@/lib/rate-limit";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     req.headers.get("x-real-ip") ||
     "127.0.0.1";
 
-  const rl = checkRateLimit(`login:${ip}`, 15, 60_000);
+  const rl = await checkRateLimitDistributed(`login:${ip}`, 15, 60_000);
   if (!rl.allowed) {
     return apiError(
       "LOGIN_RATE_LIMITED",

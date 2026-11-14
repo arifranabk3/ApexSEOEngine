@@ -153,6 +153,15 @@ export async function ensureDatabaseDaemon(): Promise<void> {
       await pglite.exec(fs.readFileSync(schedulerMigration, "utf8").replace(/^\uFEFF/, ""));
     }
 
+    // Apply security-hardening migration (idempotent ALTER TABLE ... ADD COLUMN IF NOT EXISTS)
+    const securityMigration = path.resolve(
+      process.cwd(),
+      "prisma/migrations/20261114000000_security_hardening/migration.sql"
+    );
+    if (fs.existsSync(securityMigration)) {
+      await pglite.exec(fs.readFileSync(securityMigration, "utf8").replace(/^\uFEFF/, ""));
+    }
+
     const server = new PGLiteSocketServer({
       db: pglite,
       port: parsedPort,

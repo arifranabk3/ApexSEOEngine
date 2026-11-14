@@ -66,7 +66,9 @@ describe("Security, Encryption & RBAC Unit Suite", () => {
       email: "editor@apexseo.local",
       name: "SEO Editor",
       roleName: "EDITOR",
-      permissions: ["content:read", "content:write"]
+      permissions: ["content:read", "content:write"],
+      tokenVersion: 0,
+      mustChangePassword: false
     };
 
     const token = await createSessionToken(user);

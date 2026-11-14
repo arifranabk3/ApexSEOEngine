@@ -13,21 +13,24 @@ datasource db {
 // ============================================================================
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  name         String
-  passwordHash String
-  isActive     Boolean  @default(true)
-  lastLoginAt  DateTime?
-  roleId       String
-  role         Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  id               String   @id @default(uuid())
+  email            String   @unique
+  name             String
+  passwordHash     String
+  isActive         Boolean  @default(true)
+  mustChangePassword Boolean @default(false)
+  tokenVersion     Int      @default(0)
+  lastLoginAt      DateTime?
+  passwordChangedAt DateTime?
+  roleId           String
+  role             Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
-  websites     Website[]
-  articles     Article[] @relation("ArticleAuthor")
-  auditLogs    AuditLog[]
+  websites         Website[]
+  articles         Article[] @relation("ArticleAuthor")
+  auditLogs        AuditLog[]
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@index([email])
   @@index([roleId])

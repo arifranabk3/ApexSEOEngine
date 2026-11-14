@@ -54,14 +54,20 @@ export async function ensureSystemSeeded(): Promise<void> {
 
     await db.role.upsert({
       where: { name: "EDITOR" },
-      update: {},
+      update: {
+        permissions: {
+          set: allPermissions
+            .filter((p) => p.module === "content" || (p.action === "read" && p.module !== "settings"))
+            .map((p) => ({ id: p.id }))
+        }
+      },
       create: {
         name: "EDITOR",
         description: "Manage content, keywords, and publishing pipelines",
         isSystem: true,
         permissions: {
           connect: allPermissions
-            .filter((p) => p.module === "content" || p.action === "read")
+            .filter((p) => p.module === "content" || (p.action === "read" && p.module !== "settings"))
             .map((p) => ({ id: p.id }))
         }
       }
@@ -69,14 +75,20 @@ export async function ensureSystemSeeded(): Promise<void> {
 
     await db.role.upsert({
       where: { name: "VIEWER" },
-      update: {},
+      update: {
+        permissions: {
+          set: allPermissions
+            .filter((p) => p.action === "read" && p.module !== "settings")
+            .map((p) => ({ id: p.id }))
+        }
+      },
       create: {
         name: "VIEWER",
         description: "Read-only access to dashboards and reports",
         isSystem: true,
         permissions: {
           connect: allPermissions
-            .filter((p) => p.action === "read")
+            .filter((p) => p.action === "read" && p.module !== "settings")
             .map((p) => ({ id: p.id }))
         }
       }
@@ -86,13 +98,16 @@ export async function ensureSystemSeeded(): Promise<void> {
     const adminEmail = "admin@apexseo.local";
     let adminUser = await db.user.findUnique({ where: { email: adminEmail } });
     if (!adminUser) {
-      const passwordHash = await hashPassword("Admin@12345");
+      const initialPassword = process.env.INITIAL_ADMIN_PASSWORD || "Admin@12345";
+      const passwordHash = await hashPassword(initialPassword);
       adminUser = await db.user.create({
         data: {
           email: adminEmail,
           name: "Principal SEO Architect",
           passwordHash,
           isActive: true,
+          mustChangePassword: true, // Mandatory password rotation on first login
+          tokenVersion: 0,
           roleId: superAdminRole.id
         }
       });
@@ -541,6 +556,13 @@ export async function ensureSystemSeeded(): Promise<void> {
         value: 3,
         isSecret: false,
         description: "Default retry attempts for failed workflow executions"
+      },
+      {
+        category: "SECURITY",
+        key: "security.auditHmacSecret",
+        value: "internal-hmac-salt-key-do-not-reveal",
+        isSecret: true,
+        description: "Internal cryptographic HMAC seed for audit integrity verification"
       }
     ];
 
