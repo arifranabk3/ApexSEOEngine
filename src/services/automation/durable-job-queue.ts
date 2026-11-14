@@ -10,6 +10,7 @@ import { decryptJsonCredentials } from "@/lib/crypto";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 import { getArticleRepository } from "@/repositories/article-repository.factory";
 import { getWebsiteRepository } from "@/repositories/website-repository.factory";
+import { getPublishingRepository } from "@/repositories/publishing-repository.factory";
 
 export const DURABLE_JOB_TYPES = [
   "KEYWORD_RESEARCH",
@@ -554,21 +555,20 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
           }
         }
 
-        const pubJob = await db.publishingJob.create({
-          data: {
-            websiteId: article.websiteId,
-            articleId: article.id,
-            cmsType: website.cmsType,
-            status: "COMPLETED",
-            startedAt: now,
-            completedAt: new Date(),
-            attempts: activeAttempt,
-            remotePostId: externalPostId,
-            publishedUrl,
-            responseLog: {
-              workerId,
-              gateSummary: gateDecision.auditSummary
-            } as Prisma.InputJsonValue
+        const publishingRepo = getPublishingRepository();
+        const pubJob = await publishingRepo.createPublishingJob({
+          websiteId: article.websiteId,
+          articleId: article.id,
+          cmsType: website.cmsType,
+          status: "COMPLETED",
+          startedAt: now,
+          completedAt: new Date(),
+          attempts: activeAttempt,
+          remotePostId: externalPostId,
+          publishedUrl,
+          responseLog: {
+            workerId,
+            gateSummary: gateDecision.auditSummary
           }
         });
 
