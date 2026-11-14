@@ -6,6 +6,7 @@ import { DashboardSummaryMetrics } from "@/types/domain";
 import { getAIConfigRepository } from "@/repositories/ai-config-repository.factory";
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getAutomationRepository } from "@/repositories/automation-repository.factory";
 
 export async function GET(req: NextRequest) {
   await ensureSystemSeeded();
@@ -23,9 +24,8 @@ export async function GET(req: NextRequest) {
   const publishedArticles = await articleRepo.countArticles({ status: "PUBLISHED" });
   const draftArticles = await articleRepo.countArticles({ status: "DRAFT" });
   const pendingApprovals = await articleRepo.countArticles({ status: "PENDING_APPROVAL" });
-  const activeAutomations = await db.automationWorkflow.count({
-    where: { isEnabled: true }
-  });
+  const automationRepo = getAutomationRepository();
+  const activeAutomations = await automationRepo.countWorkflows({ isEnabled: true });
   const aiConfigRepo = getAIConfigRepository();
   const healthyAIProviders = await aiConfigRepo.countHealthyProviders();
 
@@ -47,11 +47,16 @@ export async function GET(req: NextRequest) {
         )
       : 0;
 
-  const recentExecs = await db.automationExecution.findMany({
-    take: 8,
-    orderBy: { startedAt: "desc" },
-    include: { workflow: { select: { name: true } } }
-  });
+  const rawExecs = await automationRepo.findExecutions({ limit: 8 });
+  const recentExecs = await Promise.all(
+    rawExecs.map(async (ex) => {
+      const wf = await automationRepo.findWorkflowById(ex.workflowId);
+      return {
+        ...ex,
+        workflow: wf ? { name: wf.name } : null
+      };
+    })
+  );
 
   const recentAudits = await db.auditLog.findMany({
     take: 8,
@@ -78,11 +83,11 @@ export async function GET(req: NextRequest) {
     },
     recentExecutions: recentExecs.map((e) => ({
       id: e.id,
-      workflowName: e.workflow.name,
+      workflowName: e.workflow?.name || "Automated Pipeline",
       status: e.status,
       triggerSource: e.triggerSource,
-      startedAt: e.startedAt.toISOString(),
-      durationMs: e.durationMs
+      startedAt: new Date(e.startedAt).toISOString(),
+      durationMs: e.durationMs ?? null
     })),
     recentAuditLogs: recentAudits.map((a) => ({
       id: a.id,

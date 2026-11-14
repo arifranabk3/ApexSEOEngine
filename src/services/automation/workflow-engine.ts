@@ -1,5 +1,4 @@
-import { Prisma } from "@prisma/client";
-import { getDb } from "@/lib/db";
+import { getAutomationRepository } from "@/repositories/automation-repository.factory";
 
 /**
  * Calculates exponential retry delay in milliseconds with bounded jitter.
@@ -21,25 +20,21 @@ export interface TriggerWorkflowInput {
  * and persists the execution log, duration, and retry metadata.
  */
 export async function executeAutomationWorkflow(input: TriggerWorkflowInput) {
-  const db = await getDb();
-  const workflow = await db.automationWorkflow.findUnique({
-    where: { id: input.workflowId }
-  });
+  const repo = getAutomationRepository();
+  const workflow = await repo.findWorkflowById(input.workflowId);
 
   if (!workflow) {
     throw new Error("Automation workflow not found");
   }
 
   const startedAt = new Date();
-  const execution = await db.automationExecution.create({
-    data: {
-      workflowId: workflow.id,
-      status: "RUNNING",
-      triggerSource: input.triggerSource || "MANUAL",
-      attemptNumber: 1,
-      startedAt,
-      inputPayload: (input.payload || {}) as Prisma.InputJsonValue
-    }
+  const execution = await repo.createExecution({
+    workflowId: workflow.id,
+    status: "RUNNING",
+    triggerSource: input.triggerSource || "MANUAL",
+    attemptNumber: 1,
+    startedAt,
+    inputPayload: input.payload || {}
   });
 
   let finalStatus = "SUCCESS";
@@ -107,23 +102,17 @@ export async function executeAutomationWorkflow(input: TriggerWorkflowInput) {
   const finishedAt = new Date();
   const durationMs = Math.max(1, finishedAt.getTime() - startedAt.getTime());
 
-  const updatedExecution = await db.automationExecution.update({
-    where: { id: execution.id },
-    data: {
-      status: finalStatus,
-      finishedAt,
-      durationMs,
-      outputResult: outputResult as Prisma.InputJsonValue,
-      errorLog
-    }
+  const updatedExecution = await repo.updateExecution(execution.id, {
+    status: finalStatus,
+    finishedAt,
+    durationMs,
+    outputResult,
+    errorLog
   });
 
-  await db.automationWorkflow.update({
-    where: { id: workflow.id },
-    data: {
-      status: finalStatus === "SUCCESS" ? "ACTIVE" : "ERROR",
-      lastRunAt: finishedAt
-    }
+  await repo.updateWorkflow(workflow.id, {
+    status: finalStatus === "SUCCESS" ? "ACTIVE" : "ERROR",
+    lastRunAt: finishedAt
   });
 
   return updatedExecution;

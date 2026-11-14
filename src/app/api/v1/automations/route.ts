@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -10,6 +9,8 @@ import {
 } from "@/lib/api-response";
 import { executeAutomationWorkflow } from "@/services/automation/workflow-engine";
 import { recordAuditLog } from "@/lib/audit";
+import { getAutomationRepository } from "@/repositories/automation-repository.factory";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 
 const createWorkflowSchema = z.object({
   websiteId: z.string().optional(),
@@ -34,19 +35,25 @@ export async function GET(req: NextRequest) {
   const { errorResponse } = await requireApiAuth(req, "automations:read");
   if (errorResponse) return errorResponse;
 
-  const db = await getDb();
-  const workflows = await db.automationWorkflow.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
-      website: { select: { id: true, name: true } },
-      executions: {
-        take: 5,
-        orderBy: { startedAt: "desc" }
-      }
-    }
-  });
+  const repo = getAutomationRepository();
+  const websiteRepo = getWebsiteRepository();
 
-  return apiSuccess(workflows);
+  const workflows = await repo.findWorkflowsByWebsite();
+  const enriched = await Promise.all(
+    workflows.map(async (wf) => {
+      const [website, executions] = await Promise.all([
+        wf.websiteId ? websiteRepo.findWebsiteById(wf.websiteId) : null,
+        repo.findExecutions({ workflowId: wf.id, limit: 5 })
+      ]);
+      return {
+        ...wf,
+        website: website ? { id: website.id, name: website.name } : null,
+        executions
+      };
+    })
+  );
+
+  return apiSuccess(enriched);
 }
 
 export async function POST(req: NextRequest) {
@@ -60,10 +67,8 @@ export async function POST(req: NextRequest) {
   );
   if (valErr || !data) return valErr!;
 
-  const db = await getDb();
-  const existing = await db.automationWorkflow.findUnique({
-    where: { slug: data.slug }
-  });
+  const repo = getAutomationRepository();
+  const existing = await repo.findWorkflowBySlug(data.slug);
   if (existing) {
     return apiError(
       "DUPLICATE_WORKFLOW_SLUG",
@@ -72,21 +77,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const created = await db.automationWorkflow.create({
-    data: {
-      websiteId: data.websiteId || null,
-      name: data.name,
-      slug: data.slug,
-      description: data.description || null,
-      workflowType: data.workflowType,
-      n8nWorkflowId: data.n8nWorkflowId || null,
-      webhookUrl: data.webhookUrl || null,
-      scheduleCron: data.scheduleCron || null,
-      maxRetries: data.maxRetries,
-      retryBackoffMs: data.retryBackoffMs,
-      isEnabled: true,
-      status: "IDLE"
-    }
+  const created = await repo.createWorkflow({
+    websiteId: data.websiteId || null,
+    name: data.name,
+    slug: data.slug,
+    description: data.description || null,
+    workflowType: data.workflowType,
+    n8nWorkflowId: data.n8nWorkflowId || null,
+    webhookUrl: data.webhookUrl || null,
+    scheduleCron: data.scheduleCron || null,
+    maxRetries: data.maxRetries,
+    retryBackoffMs: data.retryBackoffMs,
+    isEnabled: true,
+    status: "IDLE"
   });
 
   await recordAuditLog({
@@ -117,6 +120,10 @@ export async function PUT(req: NextRequest) {
     triggerSource: "MANUAL",
     payload: data.payload
   });
+
+  if (!execution) {
+    return apiError("WORKFLOW_EXECUTION_FAILED", "Failed to execute workflow", 500);
+  }
 
   await recordAuditLog({
     userId: user.id,

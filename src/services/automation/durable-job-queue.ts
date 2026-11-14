@@ -1,5 +1,4 @@
 import crypto from "crypto";
-import { Prisma } from "@prisma/client";
 import { getDb } from "@/lib/db";
 import { calculateRetryBackoffMs } from "./workflow-engine";
 import { evaluateGoogleSearchComplianceGate } from "@/services/compliance/seo-quality-gate";
@@ -11,6 +10,7 @@ import { getKeywordDomainRepository } from "@/repositories/keyword-repository.fa
 import { getArticleRepository } from "@/repositories/article-repository.factory";
 import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 import { getPublishingRepository } from "@/repositories/publishing-repository.factory";
+import { getAutomationRepository } from "@/repositories/automation-repository.factory";
 
 export const DURABLE_JOB_TYPES = [
   "KEYWORD_RESEARCH",
@@ -120,15 +120,13 @@ export function verifyWorkerSignature(params: {
 }
 
 /**
- * Idempotently enqueues a durable background job in PostgreSQL.
+ * Idempotently enqueues a durable background job in MongoDB.
  * If a job with the same idempotencyKey already exists, returns the existing job without duplicating work.
  */
 export async function enqueueDurableJob(input: EnqueueJobInput): Promise<EnqueueJobResult> {
-  const db = await getDb();
+  const repo = getAutomationRepository();
 
-  const existing = await db.durableJob.findUnique({
-    where: { idempotencyKey: input.idempotencyKey }
-  });
+  const existing = await repo.findDurableJobByIdempotencyKey(input.idempotencyKey);
 
   if (existing) {
     return {
@@ -142,17 +140,15 @@ export async function enqueueDurableJob(input: EnqueueJobInput): Promise<Enqueue
     };
   }
 
-  const created = await db.durableJob.create({
-    data: {
-      websiteId: input.websiteId || null,
-      jobType: input.jobType,
-      idempotencyKey: input.idempotencyKey,
-      status: "QUEUED",
-      priority: input.priority ?? 10,
-      payload: (input.payload || {}) as Prisma.InputJsonValue,
-      maxAttempts: input.maxAttempts ?? 3,
-      nextRetryAt: new Date()
-    }
+  const created = await repo.createDurableJob({
+    websiteId: input.websiteId || null,
+    jobType: input.jobType,
+    idempotencyKey: input.idempotencyKey,
+    status: "QUEUED",
+    priority: input.priority ?? 10,
+    payload: input.payload || {},
+    maxAttempts: input.maxAttempts ?? 3,
+    nextRetryAt: new Date()
   });
 
   return {
@@ -171,70 +167,17 @@ export async function enqueueDurableJob(input: EnqueueJobInput): Promise<Enqueue
  * Ensures failure recovery if an external worker container crashes mid-execution.
  */
 export async function recoverStalledJobs(): Promise<number> {
-  const db = await getDb();
+  const repo = getAutomationRepository();
   const now = new Date();
-
-  const stalled = await db.durableJob.findMany({
-    where: {
-      status: "RUNNING",
-      lockedUntil: { lt: now }
-    }
-  });
-
-  let recoveredCount = 0;
-  for (const job of stalled) {
-    const canRetry = job.attempts < job.maxAttempts;
-    await db.durableJob.update({
-      where: { id: job.id },
-      data: {
-        status: canRetry ? "RETRY_SCHEDULED" : "DEAD_LETTER",
-        lockedBy: null,
-        lockedUntil: null,
-        nextRetryAt: canRetry
-          ? new Date(Date.now() + calculateRetryBackoffMs(job.attempts, 5000))
-          : job.nextRetryAt,
-        errorLog: `Stalled worker lock (${job.lockedBy || "unknown"}) expired at ${now.toISOString()}; automatically recovered.`
-      }
-    });
-    recoveredCount++;
-  }
-
-  return recoveredCount;
+  return repo.recoverStalledDurableJobs(now);
 }
 
 /**
- * Claims the next eligible job from the PostgreSQL queue for a given workerId with a lease timeout.
+ * Claims the next eligible job from the MongoDB queue for a given workerId with a lease timeout.
  */
 export async function claimNextDurableJob(workerId: string, leaseDurationMs = 60_000) {
-  await recoverStalledJobs();
-  const db = await getDb();
-  const now = new Date();
-
-  const candidate = await db.durableJob.findFirst({
-    where: {
-      status: { in: ["QUEUED", "RETRY_SCHEDULED"] },
-      nextRetryAt: { lte: now }
-    },
-    orderBy: [{ priority: "asc" }, { createdAt: "asc" }]
-  });
-
-  if (!candidate) {
-    return null;
-  }
-
-  const lockedUntil = new Date(now.getTime() + leaseDurationMs);
-  const claimed = await db.durableJob.update({
-    where: { id: candidate.id },
-    data: {
-      status: "RUNNING",
-      lockedBy: workerId,
-      lockedUntil,
-      startedAt: now,
-      attempts: candidate.attempts + 1
-    }
-  });
-
-  return claimed;
+  const repo = getAutomationRepository();
+  return repo.claimNextDurableJob(workerId, leaseDurationMs);
 }
 
 /**
@@ -242,8 +185,8 @@ export async function claimNextDurableJob(workerId: string, leaseDurationMs = 60
  * and records completion, exponential backoff retry, or dead-letter transition.
  */
 export async function processDurableJobById(jobId: string, workerId = "standalone-worker-01") {
-  const db = await getDb();
-  const job = await db.durableJob.findUnique({ where: { id: jobId } });
+  const repo = getAutomationRepository();
+  const job = await repo.findDurableJobById(jobId);
   if (!job) {
     throw new Error(`DurableJob ${jobId} not found`);
   }
@@ -252,15 +195,12 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
   const activeAttempt = job.status === "RUNNING" ? job.attempts : job.attempts + 1;
 
   if (job.status !== "RUNNING") {
-    await db.durableJob.update({
-      where: { id: job.id },
-      data: {
-        status: "RUNNING",
-        lockedBy: workerId,
-        lockedUntil: new Date(now.getTime() + 60_000),
-        startedAt: now,
-        attempts: activeAttempt
-      }
+    await repo.updateDurableJob(job.id, {
+      status: "RUNNING",
+      lockedBy: workerId,
+      lockedUntil: new Date(now.getTime() + 60_000),
+      startedAt: now,
+      attempts: activeAttempt
     });
   }
 
@@ -593,6 +533,7 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
 
       case "SEARCH_PERFORMANCE_MONITORING": {
         const targetWebsiteId = job.websiteId || String(payload.websiteId || "");
+        const db = await getDb();
         const rowCount = targetWebsiteId
           ? await db.searchPerformance.count({ where: { websiteId: targetWebsiteId } })
           : 0;
@@ -607,37 +548,31 @@ export async function processDurableJobById(jobId: string, workerId = "standalon
       }
     }
 
-    const completedJob = await db.durableJob.update({
-      where: { id: job.id },
-      data: {
-        status: "COMPLETED",
-        result: resultData as Prisma.InputJsonValue,
-        errorLog: null,
-        lockedBy: null,
-        lockedUntil: null,
-        completedAt: new Date()
-      }
+    const completedJob = await repo.updateDurableJob(job.id, {
+      status: "COMPLETED",
+      result: resultData,
+      errorLog: null,
+      lockedBy: null,
+      lockedUntil: null,
+      completedAt: new Date()
     });
 
-    return completedJob;
+    return completedJob!;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : "Unknown worker execution failure";
     const canRetry = activeAttempt < job.maxAttempts;
     const backoffMs = calculateRetryBackoffMs(activeAttempt, 5000);
     const nextRetryAt = new Date(Date.now() + backoffMs);
 
-    const failedJob = await db.durableJob.update({
-      where: { id: job.id },
-      data: {
-        status: canRetry ? "RETRY_SCHEDULED" : "DEAD_LETTER",
-        errorLog: errMsg,
-        lockedBy: null,
-        lockedUntil: null,
-        nextRetryAt
-      }
+    const failedJob = await repo.updateDurableJob(job.id, {
+      status: canRetry ? "RETRY_SCHEDULED" : "DEAD_LETTER",
+      errorLog: errMsg,
+      lockedBy: null,
+      lockedUntil: null,
+      nextRetryAt
     });
 
-    return failedJob;
+    return failedJob!;
   }
 }
 

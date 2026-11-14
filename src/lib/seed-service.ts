@@ -5,6 +5,7 @@ import { getAIConfigRepository } from "@/repositories/ai-config-repository.facto
 import { getKeywordDomainRepository } from "@/repositories/keyword-repository.factory";
 import { getContentBriefRepository } from "@/repositories/content-brief-repository.factory";
 import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getAutomationRepository } from "@/repositories/automation-repository.factory";
 
 const DEFAULT_PERMISSIONS = [
   { code: "websites:read", module: "websites", action: "read", description: "View websites" },
@@ -305,40 +306,33 @@ export async function ensureSystemSeeded(): Promise<void> {
       }
 
       // 6. Seed Default Automation Workflows
-      await db.automationWorkflow.upsert({
-        where: { slug: "gsc-daily-query-sync" },
-        update: {},
-        create: {
-          websiteId: primaryWebsite.id,
-          name: "Google Search Console Daily Query Sync",
-          slug: "gsc-daily-query-sync",
-          description: "Pulls organic queries, impressions, clicks, and average positions via official free GSC API.",
-          workflowType: "N8N_WEBHOOK",
-          n8nWorkflowId: "wf-gsc-001",
-          webhookUrl: "http://localhost:5678/webhook/gsc-daily-sync",
-          scheduleCron: "0 4 * * *",
-          isEnabled: true,
-          status: "IDLE",
-          maxRetries: 3,
-          retryBackoffMs: 5000
-        }
+      const automationRepo = getAutomationRepository();
+      await automationRepo.upsertWorkflow({
+        websiteId: primaryWebsite.id,
+        name: "Google Search Console Daily Query Sync",
+        slug: "gsc-daily-query-sync",
+        description: "Pulls organic queries, impressions, clicks, and average positions via official free GSC API.",
+        workflowType: "N8N_WEBHOOK",
+        n8nWorkflowId: "wf-gsc-001",
+        webhookUrl: "http://localhost:5678/webhook/gsc-daily-sync",
+        scheduleCron: "0 4 * * *",
+        isEnabled: true,
+        status: "IDLE",
+        maxRetries: 3,
+        retryBackoffMs: 5000
       });
 
-      await db.automationWorkflow.upsert({
-        where: { slug: "cms-publishing-queue-worker" },
-        update: {},
-        create: {
-          websiteId: primaryWebsite.id,
-          name: "CMS Scheduled Publishing Worker",
-          slug: "cms-publishing-queue-worker",
-          description: "Dispatches approved articles to WordPress REST API or Custom CMS adapters with exponential backoff.",
-          workflowType: "INTERNAL_CRON",
-          scheduleCron: "*/15 * * * *",
-          isEnabled: true,
-          status: "IDLE",
-          maxRetries: 3,
-          retryBackoffMs: 10000
-        }
+      await automationRepo.upsertWorkflow({
+        websiteId: primaryWebsite.id,
+        name: "CMS Scheduled Publishing Worker",
+        slug: "cms-publishing-queue-worker",
+        description: "Dispatches approved articles to WordPress REST API or Custom CMS adapters with exponential backoff.",
+        workflowType: "INTERNAL_CRON",
+        scheduleCron: "*/15 * * * *",
+        isEnabled: true,
+        status: "IDLE",
+        maxRetries: 3,
+        retryBackoffMs: 10000
       });
     }
 

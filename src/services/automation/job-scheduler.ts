@@ -14,8 +14,6 @@
  * Long-running execution stays in the separately deployed worker.
  */
 import crypto from "crypto";
-import { Prisma } from "@prisma/client";
-import { getDb } from "@/lib/db";
 import {
   DurableJobType,
   EnqueueJobResult,
@@ -24,6 +22,8 @@ import {
   recoverStalledJobs
 } from "./durable-job-queue";
 import { getArticleRepository } from "@/repositories/article-repository.factory";
+import { getAutomationRepository } from "@/repositories/automation-repository.factory";
+import { getWebsiteRepository } from "@/repositories/website-repository.factory";
 
 export interface DefaultScheduleSpec {
   jobType: DurableJobType;
@@ -64,25 +64,25 @@ export function scheduleKey(jobType: string, websiteId: string | null): string {
 
 /** Idempotently creates default schedules for every ACTIVE website (never overwrites operator edits). */
 export async function ensureDefaultSchedules(): Promise<number> {
-  const db = await getDb();
-  const sites = await db.website.findMany({ where: { status: "ACTIVE" }, select: { id: true } });
+  const websiteRepo = getWebsiteRepository();
+  const automationRepo = getAutomationRepository();
+  const sites = await websiteRepo.listWebsites();
+  const activeSites = sites.filter((s) => s.status === "ACTIVE");
   let created = 0;
-  for (const site of sites) {
+  for (const site of activeSites) {
     for (const spec of DEFAULT_SCHEDULES) {
       const key = scheduleKey(spec.jobType, site.id);
-      const exists = await db.jobSchedule.findUnique({ where: { key } });
+      const exists = await automationRepo.findScheduleByKey(key);
       if (exists) continue;
-      await db.jobSchedule.create({
-        data: {
-          key,
-          jobType: spec.jobType,
-          websiteId: site.id,
-          intervalMinutes: spec.intervalMinutes,
-          priority: spec.priority,
-          isEnabled: spec.enabledByDefault,
-          nextRunAt: new Date(0), // due on the first tick
-          payload: (spec.payload || {}) as Prisma.InputJsonValue
-        }
+      await automationRepo.createSchedule({
+        key,
+        jobType: spec.jobType,
+        websiteId: site.id,
+        intervalMinutes: spec.intervalMinutes,
+        priority: spec.priority,
+        isEnabled: spec.enabledByDefault,
+        nextRunAt: new Date(0), // due on the first tick
+        payload: spec.payload || {}
       });
       created++;
     }
@@ -112,18 +112,15 @@ export async function runSchedulerTick(params: {
   processBatchSize?: number;
   workerId?: string;
 }): Promise<SchedulerTickResult> {
-  const db = await getDb();
+  const automationRepo = getAutomationRepository();
   const now = params.now ?? new Date();
-  const run = await db.schedulerRun.create({ data: { triggeredBy: params.triggeredBy } });
+  const run = await automationRepo.createSchedulerRun({ triggeredBy: params.triggeredBy });
 
   try {
     await ensureDefaultSchedules();
     const recoveredLocks = await recoverStalledJobs();
 
-    const due = await db.jobSchedule.findMany({
-      where: { isEnabled: true, nextRunAt: { lte: now } },
-      orderBy: { priority: "asc" }
-    });
+    const due = await automationRepo.findDueSchedules(now);
 
     const jobs: EnqueueJobResult[] = [];
     let claimedCount = 0;
@@ -131,15 +128,16 @@ export async function runSchedulerTick(params: {
     for (const schedule of due) {
       // Optimistic lock: only one concurrent trigger can advance this schedule.
       const nextRunAt = new Date(now.getTime() + schedule.intervalMinutes * 60_000);
-      const claim = await db.jobSchedule.updateMany({
-        where: { id: schedule.id, nextRunAt: schedule.nextRunAt },
-        data: { nextRunAt, lastRunAt: now }
-      });
-      if (claim.count === 0) continue;
+      const claimed = await automationRepo.claimScheduleSlot(
+        schedule.key,
+        new Date(schedule.nextRunAt),
+        nextRunAt
+      );
+      if (!claimed) continue;
       claimedCount++;
 
       // Slot-based idempotency: the claimed `nextRunAt` uniquely identifies this run slot.
-      const bucket = schedule.nextRunAt.getTime();
+      const bucket = new Date(schedule.nextRunAt).getTime();
       const baseKey = `sched:${schedule.key}:${bucket}`;
       const basePayload = {
         ...((schedule.payload as Record<string, unknown>) || {}),
@@ -181,9 +179,8 @@ export async function runSchedulerTick(params: {
         );
       }
 
-      await db.jobSchedule.update({
-        where: { id: schedule.id },
-        data: { lastJobCount: produced.filter((j) => !j.deduplicated).length }
+      await automationRepo.updateSchedule(schedule.id, {
+        lastJobCount: produced.filter((j) => !j.deduplicated).length
       });
       jobs.push(...produced);
     }
@@ -209,27 +206,21 @@ export async function runSchedulerTick(params: {
       jobs
     };
 
-    await db.schedulerRun.update({
-      where: { id: run.id },
-      data: {
-        status: "COMPLETED",
-        recoveredLocks,
-        dueSchedules: claimedCount,
-        enqueuedCount: result.enqueuedCount,
-        deduplicatedCount: result.deduplicatedCount,
-        processedCount,
-        finishedAt: new Date()
-      }
+    await automationRepo.updateSchedulerRun(run.id, {
+      status: "COMPLETED",
+      recoveredLocks,
+      dueSchedules: claimedCount,
+      enqueuedCount: result.enqueuedCount,
+      deduplicatedCount: result.deduplicatedCount,
+      processedCount,
+      finishedAt: new Date()
     });
     return result;
   } catch (err) {
-    await db.schedulerRun.update({
-      where: { id: run.id },
-      data: {
-        status: "FAILED",
-        errorLog: err instanceof Error ? err.message : String(err),
-        finishedAt: new Date()
-      }
+    await automationRepo.updateSchedulerRun(run.id, {
+      status: "FAILED",
+      errorLog: err instanceof Error ? err.message : String(err),
+      finishedAt: new Date()
     });
     throw err;
   }

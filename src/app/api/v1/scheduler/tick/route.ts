@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { getDb } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import { apiError, apiSuccess } from "@/lib/api-response";
 import { runSchedulerTick, verifySchedulerToken } from "@/services/automation/job-scheduler";
+import { getAutomationRepository } from "@/repositories/automation-repository.factory";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -46,15 +46,16 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   if (!verifySchedulerToken(req.headers.get("authorization"))) return unauthorized();
   await ensureSystemSeeded();
-  const db = await getDb();
-  const [schedules, recentRuns, queue] = await Promise.all([
-    db.jobSchedule.findMany({ orderBy: [{ websiteId: "asc" }, { priority: "asc" }] }),
-    db.schedulerRun.findMany({ orderBy: { startedAt: "desc" }, take: 20 }),
-    db.durableJob.groupBy({ by: ["status"], _count: { _all: true } })
+  const repo = getAutomationRepository();
+  const [schedules, recentRuns, statusCounts] = await Promise.all([
+    repo.findAllSchedules(),
+    repo.findSchedulerRuns(20),
+    repo.getDurableJobStatusCounts()
   ]);
+  const queue = Object.entries(statusCounts).map(([status, count]) => ({ status, count }));
   return apiSuccess({
     schedules,
     recentRuns,
-    queue: queue.map((q) => ({ status: q.status, count: q._count._all }))
+    queue
   });
 }

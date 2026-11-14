@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb, isExternalManagedDatabase } from "@/lib/db";
+import { isExternalManagedDatabase } from "@/lib/db";
 import { ensureSystemSeeded } from "@/lib/seed-service";
 import {
   apiError,
@@ -16,6 +16,7 @@ import {
   recoverStalledJobs,
   verifyWorkerSignature
 } from "@/services/automation/durable-job-queue";
+import { getAutomationRepository } from "@/repositories/automation-repository.factory";
 
 const enqueueJobSchema = z.object({
   websiteId: z.string().optional().nullable(),
@@ -41,23 +42,13 @@ export async function GET(req: NextRequest) {
   const { errorResponse } = await requireApiAuth(req, "automations:read");
   if (errorResponse) return errorResponse;
 
-  const db = await getDb();
+  const repo = getAutomationRepository();
   const websiteId = req.nextUrl.searchParams.get("websiteId");
 
-  const whereClause = websiteId ? { websiteId } : {};
-  const [jobs, queuedCount, runningCount, completedCount, retryCount, deadLetterCount] =
-    await Promise.all([
-      db.durableJob.findMany({
-        where: whereClause,
-        orderBy: { createdAt: "desc" },
-        take: 50
-      }),
-      db.durableJob.count({ where: { ...whereClause, status: "QUEUED" } }),
-      db.durableJob.count({ where: { ...whereClause, status: "RUNNING" } }),
-      db.durableJob.count({ where: { ...whereClause, status: "COMPLETED" } }),
-      db.durableJob.count({ where: { ...whereClause, status: "RETRY_SCHEDULED" } }),
-      db.durableJob.count({ where: { ...whereClause, status: "DEAD_LETTER" } })
-    ]);
+  const [jobs, statusCounts] = await Promise.all([
+    repo.findDurableJobs({ websiteId, limit: 50 }),
+    repo.getDurableJobStatusCounts(websiteId)
+  ]);
 
   return apiSuccess({
     architecture: {
@@ -68,11 +59,11 @@ export async function GET(req: NextRequest) {
       supportedJobTypes: DURABLE_JOB_TYPES
     },
     counts: {
-      queued: queuedCount,
-      running: runningCount,
-      completed: completedCount,
-      retryScheduled: retryCount,
-      deadLetter: deadLetterCount
+      queued: statusCounts.QUEUED || 0,
+      running: statusCounts.RUNNING || 0,
+      completed: statusCounts.COMPLETED || 0,
+      retryScheduled: statusCounts.RETRY_SCHEDULED || 0,
+      deadLetter: statusCounts.DEAD_LETTER || 0
     },
     jobs
   });
