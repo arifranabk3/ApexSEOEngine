@@ -39,6 +39,9 @@ import {
 } from "lucide-react";
 import type { DashboardSummaryMetrics } from "@/types/domain";
 import ComplianceCenterPanel from "./ComplianceCenterPanel";
+import { TopicOutlineWorkflow } from "./TopicOutlineWorkflow";
+import { ArticleImageGenerator } from "./ArticleImageGenerator";
+import { FactualReviewPanel } from "./FactualReviewPanel";
 
 export type NavSectionId =
   | "overview"
@@ -1307,8 +1310,16 @@ export default function DashboardShell({
 
           {/* 5. CONTENT PLANNER & 6. AI ARTICLE WRITER */}
           {(activeNav === "content-planner" || activeNav === "ai-article-writer") && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="apex-card p-6">
+            <div className="space-y-6">
+              {/* Guided Topic Cluster & Outline Builder (Phase 02.1-C) */}
+              <TopicOutlineWorkflow
+                websiteId={selectedWebsiteId || websites[0]?.id || ""}
+                websiteName={websites.find((w) => w.id === selectedWebsiteId)?.name}
+                onPlanSaved={() => fetchAllData()}
+              />
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="apex-card p-6">
                 <h2 className="text-sm font-bold mb-4 flex items-center gap-2">
                   <FileText className="w-4 h-4 text-blue-500" />
                   Create SEO Article Draft &amp; Version Snapshot
@@ -1411,23 +1422,23 @@ export default function DashboardShell({
                 </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
           {/* 7. IMAGE GENERATOR */}
-          {activeNav === "image-generator" &&
-            renderPlaceholderModule(
-              "Zero-Cost AI Featured Image & OG Card Generator",
-              "Generates SEO-optimized featured images, alt text, and OpenGraph cards using local Stable Diffusion / ComfyUI API or deterministic SVG/Canvas templates.",
-              [
-                "Zero-cost compliance: connects to local Automatic1111 / ComfyUI API or built-in programmatic SVG banner renderer.",
-                "Automatically populates SEO altText, width, height, and caption in ArticleImage table."
-              ],
-              ["ArticleImage", "Article"]
-            )}
+          {activeNav === "image-generator" && (
+            <ArticleImageGenerator
+              articles={articles}
+              onImageAttached={() => fetchAllData()}
+            />
+          )}
 
           {/* 8. SEO OPTIMIZER & GOOGLE SEARCH + ADSENSE COMPLIANCE CENTER */}
           {activeNav === "seo-optimizer" && (
-            <ComplianceCenterPanel websiteId={selectedWebsiteId} />
+            <div className="space-y-6">
+              <ComplianceCenterPanel websiteId={selectedWebsiteId} />
+              <FactualReviewPanel websiteId={selectedWebsiteId} />
+            </div>
           )}
 
           {/* 9. INTERNAL LINKING */}
